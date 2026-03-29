@@ -517,6 +517,10 @@ tbody tr:hover td { background:#f8faff; }
       <div class="sidebar-item" onclick="showPage('parentnotice')" id="nav-parentnotice">
         <span class="icon">🔔</span><span>Parent Notice</span>
       </div>
+      <div class="sidebar-section">Exam Print</div>
+      <div class="sidebar-item" onclick="showPage('examdocs')" id="nav-examdocs">
+        <span class="icon">🖨️</span><span>Exam Documents</span>
+      </div>
     </div>
 
     <!-- Main Content -->
@@ -720,6 +724,7 @@ function showPage(page) {
         reportcard:  renderReportCard,
         reexam:      renderReExam,
         qpaper:      renderQPaper,
+        examdocs:    renderExamDocs,
     };
     if (pages[page]) {
         content.innerHTML = '<div style="text-align:center;padding:60px;color:#aaa;">⏳ Loading...</div>';
@@ -4994,6 +4999,1607 @@ window.addEventListener('beforeunload', e=>{
         e.returnValue='';
     }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EXAM DOCUMENTS — Print System
+//  Upload Master Excel → Parse → Save to MongoDB → Print beautiful A4 docs
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Print CSS injected once (runs after DOM ready) ───────────────────────────
+function injectPrintCSS(){
+  if(document.getElementById('examdocs-print-style')) return;
+  const s = document.createElement('style');
+  s.id = 'examdocs-print-style';
+  s.textContent = `
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap');
+
+/* ── Named page rules — edge to edge, no margin ── */
+@page            { size:A4; margin:0; }
+@page land       { size:A4 landscape; margin:0; }
+@page port       { size:A4 portrait;  margin:0; }
+
+@media print {
+  body > * { display:none !important; }
+  #ed-print-portal {
+    display:block !important;
+    position:fixed; inset:0;
+    background:white; z-index:99999; overflow:auto;
+  }
+  /* Landscape pages */
+  .ed-page-land {
+    page: land;
+    width:297mm; height:auto;
+    page-break-after:always; page-break-inside:avoid;
+  }
+  /* Portrait pages */
+  .ed-page-port {
+    page: port;
+    width:210mm; height:auto;
+    page-break-after:always; page-break-inside:avoid;
+  }
+  .ed-page-land:last-child,
+  .ed-page-port:last-child { page-break-after:avoid; }
+  * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+  th, td { height:auto !important; }
+  tr { height:auto !important; }
+}
+
+#ed-print-portal { display:none; }
+
+/* ── Base page styles ── */
+.ed-page-land, .ed-page-port {
+  font-family:'DM Sans','Inter',system-ui,sans-serif;
+  background:white; color:#0F1E35;
+  display:block;
+  height:auto;
+}
+
+/* ── Header ── */
+.ed-hdr { background:#1B3A6B; color:white; padding:7px 14px 5px; flex-shrink:0; }
+.ed-hdr .sn {
+  font-family:'Crimson Pro','Georgia',serif;
+  font-size:15pt; font-weight:700; text-align:center; letter-spacing:0.8px;
+}
+.ed-hdr .ss { font-size:8pt; text-align:center; color:rgba(255,255,255,.7); margin-top:2px; }
+.ed-gold { height:3px; background:#C9A84C; flex-shrink:0; }
+.ed-info {
+  background:#DCE9F8; padding:5px 14px;
+  display:flex; align-items:center; justify-content:space-between;
+  border-bottom:1.5px solid #1B3A6B; flex-shrink:0;
+}
+.ed-info span { font-size:8.5pt; color:#1B3A6B; font-weight:600; }
+.ed-foot {
+  background:#1B3A6B; color:white;
+  padding:5px 14px; font-size:8pt; text-align:center;
+  font-weight:500; letter-spacing:0.4px; flex-shrink:0;
+}
+
+/* ── Room Diary (landscape) ── */
+.rd-grid { display:grid; grid-template-columns:148px 1fr; width:100%; }
+.rd-left { border-right:2px solid #1B3A6B; display:flex; flex-direction:column; }
+.rd-lt { background:#F9E4A0; padding:8px 6px 6px; text-align:center; border-bottom:2px solid #C9A84C; }
+.rd-lt .big { font-family:'Crimson Pro','Georgia',serif; font-size:17pt; font-weight:700; color:#1B3A6B; line-height:1.1; }
+.rd-lt .sm  { font-size:7.5pt; color:#2C4F8C; margin-top:2px; }
+.rd-rm { background:#1B3A6B; color:white; text-align:center; padding:12px 6px; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.rd-rm .rn { font-family:'Crimson Pro','Georgia',serif; font-size:22pt; font-weight:700; line-height:1; }
+.rd-rm .rs { font-size:8.5pt; color:#B0C4DE; margin-top:5px; line-height:1.5; }
+.rd-cl { background:#EEF5FF; border-top:1.5px solid #B0C4DE; padding:5px 6px; }
+.rd-cl .ch { font-size:7.5pt; font-weight:700; text-align:center; background:#2C4F8C; color:white; padding:3px 4px; margin-bottom:4px; }
+.rd-cr { display:flex; justify-content:space-between; align-items:baseline; font-size:8pt; font-weight:600; color:#1B3A6B; padding:2px 3px; border-bottom:.5px solid #C8D8EC; }
+.rd-tr { background:#1B3A6B; color:white; text-align:center; font-size:8.5pt; font-weight:700; padding:3px 4px; margin-top:3px; }
+.rd-sc { border-top:2px solid #C9A84C; background:#FFFBEE; padding:5px 6px; }
+.rd-sc .sh { font-size:7.5pt; font-weight:700; text-align:center; background:#C9A84C; color:#1B3A6B; padding:2px 4px; margin-bottom:4px; }
+.rd-sr { font-size:7.5pt; color:#334155; padding:2px; border-bottom:.5px dotted #E2C877; line-height:1.4; }
+.rd-in { border-top:1.5px solid #B0C4DE; background:#F7F9FC; padding:7px 8px; font-size:8pt; color:#0F1E35; font-weight:500; line-height:2.2; }
+.rd-right { display:block; }
+.rd-right table { width:100%; border-collapse:collapse; table-layout:auto; }
+.rd-right th { background:#1B3A6B; color:white; font-size:8.5pt; font-weight:700; text-align:center; padding:6px 4px; border:1px solid #2C4F8C; }
+.rd-right td { font-size:9pt; text-align:center; padding:4px 5px; border:1px solid #B0C4DE; vertical-align:middle; font-weight:500; }
+.td-dt { font-weight:700; color:#1B3A6B; font-size:8.5pt; line-height:1.4; }
+.td-sb { font-weight:700; color:#8B5E0A; font-size:9.5pt; }
+.td-cl { font-weight:700; color:#1B3A6B; }
+.td-to { background:#DCE9F8; font-weight:700; color:#1B3A6B; font-size:10pt; }
+.td-sg { background:#FFF8EE; font-size:7.5pt; color:#64748B; text-align:left; padding-left:8px; font-style:italic; }
+.td-dr { background:#EEF5FF; font-size:7.5pt; color:#2C4F8C; font-style:italic; }
+.tr-d td { height:auto; padding:5px 5px; }
+.tr-s td { height:auto; padding:3px 5px; }
+
+/* ── Common table ── */
+.ed-th { background:#1B3A6B; color:white; padding:7px 8px; font-size:9pt; font-weight:700; border:1px solid #0F2850; text-align:left; }
+.ed-td-even { background:#F4F8FF; }
+.ed-td-odd  { background:#EAF2FF; }
+
+/* ── Portrait specific — bigger fonts since more space vertically ── */
+.ed-page-port .ed-hdr .sn { font-size:16pt; }
+.ed-page-port .ed-th { font-size:9.5pt; padding:8px 10px; }
+.ed-page-port table td { font-size:10pt; padding:6px 10px; }
+`;
+  document.head.appendChild(s);
+
+  if(!document.getElementById('ed-print-portal')){
+    const portal = document.createElement('div');
+    portal.id = 'ed-print-portal';
+    document.body.appendChild(portal);
+  }
+}
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded', injectPrintCSS);
+} else {
+  injectPrintCSS();
+}
+
+// ── Global exam docs data ────────────────────────────────────────────────────
+let ED = { loaded:false, school:'RAMNAGAR HIGH SCHOOL (H.S.)', examTitle:'1st Summative Evaluation — 2026',
+  seating:[], routine:{h1:[],h2:[]}, board1h:[], board2h:[],
+  dutycards:[], rosterRows:[], answerRows:[], attendSheets:[] };
+
+// ── Render page ──────────────────────────────────────────────────────────────
+async function renderExamDocs(el) {
+  const exams = await DB.get('exams').catch(()=>[]);
+
+  el.innerHTML = `
+  <div class="page-title">🖨️ Exam Documents</div>
+  <div style="padding:0 20px 20px">
+
+    <!-- ══ STEP 1: Excel Import ══ -->
+    <div class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b">
+      <div class="card-title">📥 Step 1 — Excel থেকে EMS-এ Import করুন</div>
+      <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+        RHS_Master_Complete.xlsx upload করুন → সব data EMS MongoDB-তে save হবে → তারপর যেকোনো exam print করুন
+      </p>
+      <div id="ed-upload-zone"
+        style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px"
+        ondragover="event.preventDefault();this.style.borderColor='#f59e0b'"
+        ondragleave="this.style.borderColor=''"
+        ondrop="edHandleDrop(event)"
+        onclick="if(event.target.tagName!=='INPUT') document.getElementById('ed-file-input').click()">
+        <input type="file" id="ed-file-input" accept=".xlsx,.xls" style="display:none" onchange="edLoadFile(event)">
+        <div style="font-size:32px;margin-bottom:8px">📊</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:3px">Drop Excel here or click to upload</div>
+        <div style="font-size:12px;color:var(--text-2)">RHS_Master_Complete.xlsx</div>
+      </div>
+      <div id="ed-parse-status" style="display:none;font-size:12px;padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="edImportToEMS()" id="ed-import-btn" disabled>
+          📤 Import to EMS (MongoDB)
+        </button>
+        <button class="btn btn-secondary" onclick="edLoadFile_printOnly()" id="ed-printonly-btn" disabled>
+          🖨️ Just Print (no import)
+        </button>
+      </div>
+      <div id="ed-import-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+    </div>
+
+    <!-- ══ STEP 2: Generate from EMS ══ -->
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
+      <div class="card-title">⚡ Step 2 — EMS Data থেকে Documents Generate করুন</div>
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--text-2);display:block;margin-bottom:5px">Exam Select করুন</label>
+          <select id="ed-exam-sel" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit">
+            <option value="">— Select Exam —</option>
+            ${exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="edGenerateFromEMS()" style="white-space:nowrap">⚡ Generate</button>
+        <button class="btn btn-secondary" onclick="renderExamDocs(document.getElementById('mainContent'))" style="white-space:nowrap" title="Refresh exam list">🔄</button>
+      </div>
+      <div id="ed-ems-status" style="font-size:12px;color:var(--text-2);margin-top:10px">
+        ${ED.loaded
+          ? `✅ Ready — ${(ED.seating||[]).length} seating rows · ${(ED.attendSheets||[]).length} sheets · ${(ED.dutycards||[]).length} duty cards`
+          : exams.length ? 'Exam select করে Generate করুন' : '⚠️ No exams found — Step 1 দিয়ে Excel import করুন'}
+      </div>
+    </div>
+
+    <!-- ══ STEP 3: Print ══ -->
+    <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">🖨️ Step 3 — Print Documents</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-bottom:14px">
+      ${[
+        ['roomdiary',   '📓','Room Diary',        'Per room, daily'],
+        ['seating',     '📋','Seating Plan',       '1st & 2nd Half'],
+        ['board1h',     '📌','Notice Board 1H',    'Room allotment'],
+        ['board2h',     '📌','Notice Board 2H',    'Room allotment'],
+        ['routine',     '📅','Exam Routine',       'Full schedule'],
+        ['dutycards',   '👤','Duty Cards',         'Per teacher'],
+        ['roster',      '📋','Duty Roster',        'All invigilators'],
+        ['answerscript','📦','Answer Script',      'Class-wise'],
+        ['attendance',  '📊','Attendance Sheets',  'Subject-wise'],
+      ].map(([id,icon,title,desc])=>`
+        <div class="tool-card" onclick="edPrint('${id}')" style="cursor:pointer">
+          <div style="font-size:24px;margin-bottom:6px">${icon}</div>
+          <div class="tool-name" style="font-size:12px">${title}</div>
+          <div class="tool-desc" style="font-size:11px">${desc}</div>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;padding:12px 14px;background:var(--bg);border-radius:10px;border:1px solid var(--border)">
+      <div style="flex:1;font-size:12px;color:var(--text-2)">সব documents একসাথে print করুন</div>
+      <button class="btn btn-primary" onclick="edPrintAll()">🖨️ Print All</button>
+    </div>
+  </div>`;
+}
+
+// ── Excel → EMS Import ────────────────────────────────────────────────────────
+let _edWb = null; // parsed workbook
+
+function edLoadFile(e) {
+  if(e.target.files[0]) edProcessFile(e.target.files[0]);
+}
+function edHandleDrop(e) {
+  e.preventDefault();
+  document.getElementById('ed-upload-zone').style.borderColor='';
+  if(e.dataTransfer.files[0]) edProcessFile(e.dataTransfer.files[0]);
+}
+
+function edProcessFile(file) {
+  const reader = new FileReader();
+  const statusEl = document.getElementById('ed-parse-status');
+  if(statusEl){ statusEl.style.display='block'; statusEl.textContent='⏳ Parsing Excel...'; }
+
+  reader.onload = ev => {
+    try {
+      _edWb = XLSX.read(ev.target.result, {type:'array', cellDates:false});
+      const sheets = _edWb.SheetNames;
+
+      // Also parse for print (existing ED structure)
+      edParseWorkbook(_edWb);
+
+      if(statusEl) statusEl.textContent = `✅ "${file.name}" parsed — ${sheets.length} sheets found`;
+      const importBtn = document.getElementById('ed-import-btn');
+      const printBtn  = document.getElementById('ed-printonly-btn');
+      if(importBtn) importBtn.disabled = false;
+      if(printBtn)  printBtn.disabled  = false;
+      showAlert('Excel parsed! Click "Import to EMS" to save data.', 'success');
+    } catch(err) {
+      if(statusEl) statusEl.textContent = '❌ Error: ' + err.message;
+      showAlert('Error reading file: '+err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function edImportToEMS() {
+  if(!_edWb){ showAlert('Upload Excel first.','error'); return; }
+
+  const importBtn = document.getElementById('ed-import-btn');
+  const statusEl  = document.getElementById('ed-import-status');
+  importBtn.disabled = true;
+  importBtn.textContent = '⏳ Importing...';
+
+  const getRows = name => {
+    const ws = _edWb.Sheets[name];
+    return ws ? XLSX.utils.sheet_to_json(ws,{header:1,defval:null}) : [];
+  };
+  const find = kw => _edWb.SheetNames.find(n=>n.includes(kw))||'';
+
+  try {
+    // ── 1. Parse Exam (create one exam entry) ──
+    const routineRows = getRows(find('Routine'));
+    let examName = '1st Summative Evaluation';
+    let examYear = '2026';
+    routineRows.forEach(r => {
+      if(r[0] && String(r[0]).includes('Summative')) {
+        const m = String(r[0]).match(/(\d+st|\d+nd|\d+rd|\d+th)?\s*(Summative|Annual|Half[- ]Yearly)[^—]*/i);
+        if(m) examName = m[0].trim().replace(/\s+—\s+.*/, '');
+        const ym = String(r[0]).match(/20\d{2}/);
+        if(ym) examYear = ym[0];
+      }
+    });
+    const examId = 'excel_' + Date.now();
+    const exam = { id: examId, name: examName, year: examYear, status:'Completed',
+                   createdOn: new Date().toISOString() };
+
+    // ── 2. Parse Timetable ──
+    const timetables = [];
+    let half = '1st Half';
+    routineRows.forEach(r => {
+      if(!r[0]) return;
+      const a = String(r[0]);
+      if(a.includes('1st Half')) { half='1st Half'; return; }
+      if(a.includes('2nd Half')) { half='2nd Half'; return; }
+      if(r[0] && r[1] && String(r[0]).match(/^\d{2}-\d{2}-20/)) {
+        timetables.push({
+          id: examId+'_'+r[0]+'_'+r[2],
+          examId, examName,
+          date: r[0], day: r[1], subject: r[2]||'',
+          className: r[3]||'', time: r[4]||'',
+          session: half,
+        });
+      }
+    });
+
+    // ── 3. Parse Seating Plan ──
+    const seatRows = getRows(find('Seating Plan'));
+    const planArr = [];
+    seatRows.forEach(r => {
+      if(!r[0]||!String(r[0]).startsWith('R-')||!r[2]) return;
+      planArr.push({
+        roomName: r[0], gender: r[1], half: r[2],
+        class: r[3], section: r[4],
+        assigned: r[5]||0, capacity: r[6]||0, vacant: r[7]||0,
+        rolls: r[8]||''
+      });
+    });
+    const seatingPlan = { id: examId+'_sp', examId, examName,
+      totalHalls: [...new Set(planArr.map(p=>p.roomName))].length,
+      plan: planArr, createdOn: new Date().toISOString() };
+
+    // ── 4. Parse Invigilator Roster ──
+    const rosterRows = getRows(find('Duty Roster'));
+    const rosterArr = [];
+    rosterRows.forEach(r => {
+      if(typeof r[0]==='number' && r[1] && r[6]) {
+        rosterArr.push({
+          date: r[1], day: r[2]||'', session: r[3]==='1H'?'1st Half':'2nd Half',
+          half: r[3]||'', hall: r[4]||'', subject: r[5]||'',
+          teacherName: r[6]||'', teacherName2: r[7]||''
+        });
+      }
+    });
+    const roster = { id: examId+'_ir', examId, examName,
+      roster: rosterArr, createdOn: new Date().toISOString() };
+
+    // ── 5. Parse Teachers from Teacher Chart (with subjects) ──
+    const teacherChartRows = getRows(find('Teacher Chart'));
+    const teacherMap = {};
+    let currentTeacher = null, currentSl = 0;
+    teacherChartRows.forEach(r => {
+      if(!r[0] && !r[1]) return;
+      if(typeof r[0] === 'number' && r[1]) {
+        // New teacher row
+        currentTeacher = String(r[1]).trim();
+        currentSl = r[0];
+        if(!teacherMap[currentTeacher]) {
+          teacherMap[currentTeacher] = { name: currentTeacher, subjects: [] };
+        }
+        if(r[2] && r[3]) teacherMap[currentTeacher].subjects.push({ class: r[2], subject: r[3] });
+      } else if(!r[0] && !r[1] && r[2] && r[3] && currentTeacher) {
+        // Continuation row (same teacher, more classes)
+        teacherMap[currentTeacher].subjects.push({ class: r[2], subject: r[3] });
+      }
+    });
+
+    // Also from _TeacherList
+    const teacherListRows = getRows('_TeacherList');
+    teacherListRows.forEach(r => {
+      if(!r[0]) return;
+      const name = String(r[0]).trim();
+      if(name && !teacherMap[name]) teacherMap[name] = { name, subjects: [] };
+    });
+
+    // Also extract from roster
+    rosterArr.forEach(r => {
+      [r.teacherName, r.teacherName2].filter(Boolean).forEach(name => {
+        if(!teacherMap[name]) teacherMap[name] = { name, subjects: [] };
+      });
+    });
+
+    const existingTeachers = await DB.get('teachers').catch(()=>[]);
+    const existingTMap = {};
+    existingTeachers.forEach(t => existingTMap[(t.name||'').toUpperCase()] = t);
+
+    const newTeachers = Object.values(teacherMap).map(t => {
+      const key = t.name.toUpperCase();
+      const existing = existingTMap[key];
+      const shortName = t.name.split(' ').map((w,i)=> i===t.name.split(' ').length-1 ? w : w[0]+'.').join(' ');
+      return {
+        id: existing?.id || ('t_'+Date.now()+'_'+Math.random().toString(36).slice(2,6)),
+        name: t.name,
+        shortName: existing?.shortName || shortName,
+        phone: existing?.phone || '',
+        subject: t.subjects.map(s=>s.subject).filter((v,i,a)=>a.indexOf(v)===i).join(', '),
+        classes: t.subjects.map(s=>s.class).filter((v,i,a)=>a.indexOf(v)===i).join(', '),
+        assignments: t.subjects,
+      };
+    });
+
+    // ── 6. Parse Answer Script Distribution ──
+    const answerRows = getRows(find('Answer Script'));
+    const answerData = [];
+    let currentClass = '';
+    answerRows.forEach(r => {
+      if(!r[0] && !r[1]) return;
+      const a = String(r[0]||'');
+      if(a.trim().startsWith('Class')) { currentClass = a.trim(); return; }
+      if(typeof r[0]==='number' && r[1]) {
+        answerData.push({
+          examId, class: currentClass, sl: r[0],
+          subject: r[1]||'', teacher: r[3]||''
+        });
+      }
+    });
+
+    // ── 7. Parse Student Count → Halls & Classes ──
+    const countRows = getRows(find('Student Count'));
+    const hallsData = [];
+    const classesData = [];
+    let inRoomSection = false;
+    countRows.forEach(r => {
+      if(!r[0]) return;
+      const a = String(r[0]);
+      if(a.includes('Room Capacity')) { inRoomSection = true; return; }
+      if(a.includes('Room') && r[1]==='Capacity') return; // header
+
+      if(!inRoomSection && r[0] && r[1] && typeof r[1]==='number') {
+        // Class row: Class V, 57, 53, 110...
+        classesData.push({
+          id: 'cls_'+a.replace(/\s+/g,'_'),
+          name: a.trim(), boys: r[1]||0, girls: r[2]||0, total: r[3]||0,
+          boysRooms: r[4]||'', girlsRooms: r[5]||''
+        });
+      }
+      if(inRoomSection && a.startsWith('R-') && typeof r[1]==='number') {
+        hallsData.push({
+          id: 'hall_'+a,
+          name: a, capacity: r[1]||0,
+          assigned1H: r[2]||0, vacant1H: r[3]||0,
+          assigned2H: r[4]||0, vacant2H: r[5]||0
+        });
+      }
+    });
+
+    // ── 8. Save ALL to MongoDB ──
+    if(statusEl) statusEl.textContent = '☁️ Saving to MongoDB...';
+
+    const existingExams = await DB.get('exams').catch(()=>[]);
+    const existingTT   = await DB.get('examTimetables').catch(()=>[]);
+    const existingSP   = await DB.get('seatingPlans').catch(()=>[]);
+    const existingIR   = await DB.get('invigilatorRosters').catch(()=>[]);
+    const existingHalls   = await DB.get('halls').catch(()=>[]);
+    const existingClasses = await DB.get('classes').catch(()=>[]);
+
+    await Promise.all([
+      DB.set('exams',              [...existingExams.filter(e=>e.id!==examId), exam]),
+      DB.set('examTimetables',     [...existingTT.filter(t=>t.examId!==examId), ...timetables]),
+      DB.set('seatingPlans',       [...existingSP.filter(s=>s.examId!==examId), seatingPlan]),
+      DB.set('invigilatorRosters', [...existingIR.filter(r=>r.examId!==examId), roster]),
+      DB.set('teachers',           newTeachers),
+      DB.set('answerScripts',      [...(await DB.get('answerScripts').catch(()=>[])).filter(a=>a.examId!==examId), ...answerData]),
+      DB.set('halls',              hallsData.length ? hallsData : existingHalls),
+      DB.set('classes',            classesData.length ? classesData : existingClasses),
+    ]);
+
+    const counts = {
+      exams: 1, timetable: timetables.length, seating: planArr.length,
+      roster: rosterArr.length, teachers: newTeachers.length,
+      answer: answerData.length, halls: hallsData.length, classes: classesData.length
+    };
+
+    if(statusEl) statusEl.innerHTML = `
+      ✅ <b>Import complete!</b><br>
+      📋 ${counts.timetable} timetable entries &nbsp;·&nbsp;
+      🪑 ${counts.seating} seating rows &nbsp;·&nbsp;
+      👮 ${counts.roster} roster entries<br>
+      👩‍🏫 ${counts.teachers} teachers &nbsp;·&nbsp;
+      📦 ${counts.answer} answer script rows &nbsp;·&nbsp;
+      🏫 ${counts.halls} halls &nbsp;·&nbsp;
+      📚 ${counts.classes} classes`;
+
+    showAlert('✅ সব data EMS-এ import হয়েছে! এখন Step 2 থেকে Generate করুন।', 'success');
+    setTimeout(()=> renderExamDocs(document.getElementById('mainContent')), 1500);
+
+  } catch(err) {
+    console.error(err);
+    showAlert('Import error: '+err.message, 'error');
+    if(statusEl) statusEl.textContent = '❌ Error: '+err.message;
+  }
+
+  importBtn.disabled = false;
+  importBtn.textContent = '📤 Import to EMS (MongoDB)';
+}
+
+// ── Generate from EMS data ────────────────────────────────────────────────────
+async function edGenerateFromEMS(refresh=false) {
+  const examId = document.getElementById('ed-exam-sel')?.value;
+  if(!examId){ showAlert('Please select an exam.','error'); return; }
+
+  const statusEl = document.getElementById('ed-ems-status');
+  if(statusEl) statusEl.textContent = '⏳ Loading data from MongoDB...';
+
+  try {
+    // Load all needed collections in parallel
+    const [exams, timetables, seatingPlans, invigilatorRosters, students, teachers, settings] = await Promise.all([
+      DB.get('exams'),
+      DB.get('examTimetables'),
+      DB.get('seatingPlans'),
+      DB.get('invigilatorRosters'),
+      DB.get('students'),
+      DB.get('teachers'),
+      DB.getObj('settings'),
+    ]);
+
+    const exam = exams.find(e=>String(e.id)===String(examId));
+    if(!exam){ showAlert('Exam not found.','error'); return; }
+
+    const tt = timetables.filter(t=>String(t.examId)===String(examId));
+    const sp = seatingPlans.find(p=>String(p.examId)===String(examId));
+    const ir = invigilatorRosters.find(r=>String(r.examId)===String(examId));
+
+    ED.school    = settings.schoolName || 'RAMNAGAR HIGH SCHOOL (H.S.)';
+    ED.examTitle = exam.name + (exam.year ? ' — ' + exam.year : '');
+
+    // ── Build ED.routine from examTimetables ──
+    const h1=[], h2=[];
+    tt.forEach(t => {
+      const entry = {
+        date: t.date,
+        day:  t.day || new Date(t.date).toLocaleDateString('en-IN',{weekday:'short'}),
+        subject: t.subject || t.subjectName || '',
+        classes: t.className || t.class || '',
+        time: t.time || t.startTime || ''
+      };
+      const sess = (t.session||'').toLowerCase();
+      if(sess.includes('2nd')||sess.includes('second')||sess.includes('afternoon')) h2.push(entry);
+      else h1.push(entry);
+    });
+    // deduplicate by date+subject
+    const dedup = arr => arr.filter((v,i,a)=>i===a.findIndex(x=>x.date===v.date&&x.subject===v.subject));
+    ED.routine = { h1: dedup(h1).sort((a,b)=>a.date.localeCompare(b.date)),
+                   h2: dedup(h2).sort((a,b)=>a.date.localeCompare(b.date)) };
+
+    // ── Build ED.seating from seatingPlans ──
+    ED.seating = [];
+    if(sp && sp.plan) {
+      // Group by roomName
+      const roomMap = {};
+      sp.plan.forEach(p => {
+        const key = p.roomName || p.roomNo || 'Room';
+        if(!roomMap[key]) roomMap[key] = [];
+        roomMap[key].push(p);
+      });
+      Object.entries(roomMap).forEach(([room, students]) => {
+        // Group by class+section within room
+        const clsMap = {};
+        students.forEach(s => {
+          const k = (s.class||'?')+'_'+(s.section||'');
+          if(!clsMap[k]) clsMap[k]=[];
+          clsMap[k].push(s);
+        });
+        Object.entries(clsMap).forEach(([clsKey, sts]) => {
+          const [cls,sec] = clsKey.split('_');
+          const rolls = sts.map(s=>s.roll).sort((a,b)=>Number(a)-Number(b));
+          // Build roll ranges
+          const rollStr = edBuildRollRange(rolls);
+          ED.seating.push({
+            room, gender: sec==='B'||sec==='b'?'GIRLS':'BOYS',
+            half: '1st Half', cls, sec,
+            assigned: sts.length, capacity: sts.length,
+            vacant: 0, rolls: rollStr
+          });
+        });
+      });
+    }
+
+    // ── Build attendance sheets from timetable + seating ──
+    ED.attendSheets = [];
+    const allSessions = [...h1.map(e=>({...e,sess:'1st Half'})), ...h2.map(e=>({...e,sess:'2nd Half'}))];
+    const seen = new Set();
+    allSessions.forEach(entry => {
+      const key = entry.date+'_'+entry.subject;
+      if(seen.has(key)) return; seen.add(key);
+      // Build rows for this subject
+      const rows = [
+        [ED.school],
+        [`${ED.examTitle}   ·   ${entry.sess}`],
+        [`Date : ${entry.date}  (${entry.day})          Subject : ${entry.subject}          Time : ${entry.time}`],
+        [], ['ROOM\nNO.','CLASS\n& SEC','Actual Roll Nos. Assigned','Total\nAssigned','Absentee Roll Nos.','Total\nPresent','Signature of\nInvigilator'],
+      ];
+      // Add seating rows grouped by gender
+      const boysRooms = ED.seating.filter(s=>s.gender==='BOYS');
+      const girlsRooms = ED.seating.filter(s=>s.gender==='GIRLS');
+      if(boysRooms.length) rows.push(['  BOYS  (Section A)']);
+      boysRooms.forEach(s=>{ rows.push([s.room, `${s.cls} ${s.sec}`, s.rolls, s.assigned,null,null,null]); });
+      if(girlsRooms.length) rows.push(['  GIRLS  (Section B)']);
+      girlsRooms.forEach(s=>{ rows.push([s.room, `${s.cls} ${s.sec}`, s.rolls, s.assigned,null,null,null]); });
+
+      ED.attendSheets.push({ name: `${entry.sess==='1st Half'?'1H':'2H'} ${entry.date} ${entry.subject}`, rows });
+    });
+
+    // ── Build duty cards from invigilatorRosters ──
+    ED.dutycards = [];
+    if(ir && ir.roster) {
+      const teacherMap = {};
+      ir.roster.forEach(r => {
+        const name = r.teacherName || r.teacher || '—';
+        if(!teacherMap[name]) teacherMap[name] = { name, duties:[], totalDuties:0 };
+        teacherMap[name].duties.push({
+          sl: teacherMap[name].duties.length+1,
+          date: r.date, day: r.day||'',
+          half: r.session||r.half||'',
+          room: r.hall||r.room||'',
+          subject: r.subject||''
+        });
+        teacherMap[name].totalDuties++;
+      });
+      ED.dutycards = Object.values(teacherMap);
+    }
+
+    // ── Build roster rows ──
+    ED.rosterRows = [];
+    if(ir && ir.roster) {
+      const byDate = {};
+      ir.roster.forEach(r => {
+        const d = r.date||'';
+        if(!byDate[d]) byDate[d] = {};
+        const s = r.session||r.half||'';
+        if(!byDate[d][s]) byDate[d][s] = [];
+        byDate[d][s].push(r);
+      });
+      let sl = 1;
+      Object.entries(byDate).sort(([a],[b])=>a.localeCompare(b)).forEach(([date, sessions]) => {
+        ED.rosterRows.push([`  ${date}`]);
+        Object.entries(sessions).forEach(([sess, rows]) => {
+          ED.rosterRows.push([`    ${sess}`]);
+          rows.forEach(r => {
+            ED.rosterRows.push([sl++, r.date, r.day||'', r.session||r.half||'',
+              r.hall||r.room||'', r.subject||'', r.teacherName||'', r.teacherName2||'']);
+          });
+        });
+      });
+    }
+
+    // ── Build answer script rows ──
+    ED.answerRows = [];
+    const classGroups = {};
+    tt.forEach(t => {
+      const cls = t.className||t.class||'';
+      if(!classGroups[cls]) classGroups[cls] = [];
+      const existing = classGroups[cls].find(x=>x.subject===t.subject);
+      if(!existing) classGroups[cls].push({ subject: t.subject||'', teacher: t.teacher||'' });
+    });
+    Object.entries(classGroups).sort(([a],[b])=>a.localeCompare(b)).forEach(([cls, subjects]) => {
+      ED.answerRows.push([`  Class  ${cls}`]);
+      ED.answerRows.push(['SL','Subject','Total Copies',"Teacher's Name",'Signature']);
+      subjects.forEach((s,i) => ED.answerRows.push([i+1, s.subject, null, s.teacher||'', null]));
+    });
+
+    // ── Build board (notice board) from seating + students ──
+    const boardRows = [
+      [ED.school], [`${ED.examTitle}  —  Room Allotment Notice Board  (1st Half)`], [], ['BOYS  —  Section A',null,null,null,null,null,'GIRLS  —  Section B'],
+      ['SL','Roll','Name','Class','Room',null,'SL','Roll','Name','Class','Room']
+    ];
+    const boyStudents  = students.filter(s=>s.section==='A'||s.section==='a').sort((a,b)=>Number(a.roll)-Number(b.roll));
+    const girlStudents = students.filter(s=>s.section==='B'||s.section==='b').sort((a,b)=>Number(a.roll)-Number(b.roll));
+    // Map roll to room from seating plan
+    const rollToRoom = {};
+    if(sp&&sp.plan) sp.plan.forEach(p=>{ rollToRoom[p.roll] = p.roomName||p.roomNo||''; });
+    const maxLen = Math.max(boyStudents.length, girlStudents.length);
+    for(let i=0;i<maxLen;i++){
+      const b=boyStudents[i], g=girlStudents[i];
+      boardRows.push([
+        b?i+1:'', b?b.roll:'', b?b.name:'', b?b.class:'', b?rollToRoom[b.roll]||'':'',
+        null,
+        g?i+1:'', g?g.roll:'', g?g.name:'', g?g.class:'', g?rollToRoom[g.roll]||'':''
+      ]);
+    }
+    ED.board1h = boardRows;
+    ED.board2h = boardRows.map(r=>{ const c=[...r]; if(c[1]==='1st Half') c[1]='2nd Half'; return c; }); // simplified
+
+    // Rebuild room diary
+    ED.roomDiary = edBuildRoomDiary();
+    ED.loaded = true;
+
+    const n = ED.seating.length;
+    const tt2 = ED.attendSheets.length;
+    const dc = ED.dutycards.length;
+    if(statusEl) statusEl.innerHTML = `✅ Ready! <b>${n}</b> rooms · <b>${tt2}</b> attendance sheets · <b>${dc}</b> teacher duty cards`;
+    showAlert(`✅ Documents generated from "${exam.name}"!`, 'success');
+
+  } catch(err) {
+    console.error(err);
+    showAlert('Error loading data: '+err.message, 'error');
+    if(statusEl) statusEl.textContent = '❌ Error: '+err.message;
+  }
+}
+
+// ── Helper: build roll range string (1,2,4-7,9) ──────────────────────────────
+function edBuildRollRange(rolls) {
+  if(!rolls||!rolls.length) return '';
+  const nums = [...new Set(rolls.map(r=>parseInt(r)).filter(n=>!isNaN(n)))].sort((a,b)=>a-b);
+  const ranges = [];
+  let start=nums[0], end=nums[0];
+  for(let i=1;i<nums.length;i++){
+    if(nums[i]===end+1) end=nums[i];
+    else { ranges.push(start===end?String(start):`${start}–${end}`); start=end=nums[i]; }
+  }
+  ranges.push(start===end?String(start):`${start}–${end}`);
+  return ranges.join(', ');
+}
+
+// ── File handling ────────────────────────────────────────────────────────────
+function edHandleDrop(e) {
+  e.preventDefault();
+  document.getElementById('ed-upload-zone').style.borderColor = '';
+  const f = e.dataTransfer.files[0];
+  if(f) edProcessFile(f);
+}
+function edLoadFile(e) { if(e.target.files[0]) edProcessFile(e.target.files[0]); }
+
+function edProcessFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const wb = XLSX.read(ev.target.result, {type:'array', cellDates:false});
+      edParseWorkbook(wb);
+      document.getElementById('ed-file-status').style.display = 'block';
+      document.getElementById('ed-file-status').textContent = `✅ "${file.name}" loaded — ${wb.SheetNames.length} sheets found`;
+      document.getElementById('ed-sync-card').style.display = 'block';
+      document.getElementById('ed-save-btn').disabled = false;
+      document.getElementById('ed-db-status').textContent = 'Ready to save';
+      showAlert('Excel file parsed successfully!', 'success');
+    } catch(err) {
+      showAlert('Error reading file: ' + err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── Parse workbook ───────────────────────────────────────────────────────────
+function edParseWorkbook(wb) {
+  const getRows = name => {
+    const ws = wb.Sheets[name];
+    return ws ? XLSX.utils.sheet_to_json(ws, {header:1, defval:null}) : [];
+  };
+  const find = kw => wb.SheetNames.find(n => n.includes(kw)) || '';
+
+  ED.seating    = edParseSeat(getRows(find('Seating Plan')));
+  ED.routine    = edParseRoutine(getRows(find('Exam Routine')));
+  ED.board1h    = getRows(find('Board 1st') || find('1st Half'));
+  ED.board2h    = getRows(find('Board 2nd') || find('2nd Half'));
+  ED.dutycards  = edParseDutyCards(getRows(find('Teacher Duty')));
+  ED.rosterRows = getRows(find('Duty Roster'));
+  ED.answerRows = getRows(find('Answer Script'));
+  ED.attendSheets = [];
+  wb.SheetNames.forEach(n => { if(/^[12]H /.test(n)) ED.attendSheets.push({name:n, rows:getRows(n)}); });
+  ED.roomDiary  = edBuildRoomDiary();
+  ED.loaded     = true;
+}
+
+function edParseRoutine(rows) {
+  const h1=[],h2=[]; let half=null;
+  rows.forEach(r => {
+    if(!r||!r[0]) return;
+    const a=String(r[0]);
+    if(a.includes('1st Half')){half='1H';return;}
+    if(a.includes('2nd Half')){half='2H';return;}
+    if(r[0]&&r[1]&&String(r[0]).match(/\d{2}-\d{2}/)){
+      const e={date:r[0],day:r[1],subject:r[2],classes:r[3],time:r[4]};
+      if(half==='1H')h1.push(e); if(half==='2H')h2.push(e);
+    }
+  });
+  return {h1,h2};
+}
+
+function edParseSeat(rows) {
+  const out=[];
+  rows.forEach(r => {
+    if(!r||!r[0]||!String(r[0]).startsWith('R-')||!r[2]) return;
+    out.push({room:r[0],gender:r[1],half:r[2],cls:r[3],sec:r[4],assigned:r[5],capacity:r[6],vacant:r[7],rolls:r[8]});
+  });
+  return out;
+}
+
+function edParseDutyCards(rows) {
+  const cards=[]; let cur=null;
+  rows.forEach(r => {
+    if(!r||!r[0]) return;
+    const a=String(r[0]);
+    if(a.includes('Teacher :')){if(cur)cards.push(cur); cur={name:a.replace('Teacher :','').trim(),duties:[],totalDuties:0};}
+    else if(cur&&a.includes('Total Duties:')) cur.totalDuties=parseInt(a.replace('Total Duties:',''))||0;
+    else if(cur&&typeof r[0]==='number'&&r[1]) cur.duties.push({sl:r[0],date:r[1],day:r[2],half:r[3],room:r[4],subject:r[5]});
+  });
+  if(cur) cards.push(cur);
+  return cards;
+}
+
+function edBuildRoomDiary() {
+  const rooms={};
+  ED.seating.forEach(s => {
+    const key=`${s.room}_${s.half==='1st Half'?'1H':'2H'}`;
+    if(!rooms[key]) rooms[key]={room:s.room,half:s.half,gender:s.gender,classes:[],totalStudents:0,capacity:0};
+    rooms[key].classes.push({cls:s.cls,sec:s.sec,assigned:s.assigned||0,rolls:s.rolls});
+    rooms[key].totalStudents+=(s.assigned||0);
+    rooms[key].capacity=Math.max(rooms[key].capacity,s.capacity||0);
+  });
+  Object.values(rooms).forEach(r => {
+    r.schedule = (r.half==='1st Half')?ED.routine.h1:ED.routine.h2;
+  });
+  return Object.values(rooms).sort((a,b)=>{
+    const ra=parseInt(a.room.replace('R-','')), rb=parseInt(b.room.replace('R-',''));
+    return ra!==rb?ra-rb:(a.half==='1st Half'?0:1)-(b.half==='1st Half'?0:1);
+  });
+}
+
+// ── MongoDB save/load ────────────────────────────────────────────────────────
+async function edSaveToDB() {
+  if(!ED.loaded){showAlert('Please upload a file first.','error');return;}
+  const btn=document.getElementById('ed-save-btn');
+  const st=document.getElementById('ed-db-status');
+  btn.disabled=true; btn.textContent='💾 Saving...';
+  st.textContent='Saving to MongoDB...';
+  try {
+    await Promise.all([
+      DB.set('examDocs_seating',   ED.seating),
+      DB.set('examDocs_routine',   [ED.routine]),
+      DB.set('examDocs_board1h',   ED.board1h),
+      DB.set('examDocs_board2h',   ED.board2h),
+      DB.set('examDocs_duty',      ED.dutycards),
+      DB.set('examDocs_roster',    ED.rosterRows),
+      DB.set('examDocs_answer',    ED.answerRows),
+      DB.set('examDocs_attend',    ED.attendSheets),
+    ]);
+    showAlert('✅ All exam data saved to MongoDB!', 'success');
+    st.textContent = '✅ Saved to MongoDB — ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    showAlert('Saved locally (MongoDB offline)', 'warning');
+    st.textContent = '💾 Saved locally';
+  }
+  btn.disabled=false; btn.textContent='💾 Save All Data to MongoDB';
+}
+
+async function edLoadFromDB(silent=false) {
+  const st=document.getElementById('ed-db-status');
+  if(st) st.textContent='Loading from DB...';
+  try {
+    const [seat,rout,b1,b2,duty,roster,ans,att] = await Promise.all([
+      DB.get('examDocs_seating'),
+      DB.get('examDocs_routine'),
+      DB.get('examDocs_board1h'),
+      DB.get('examDocs_board2h'),
+      DB.get('examDocs_duty'),
+      DB.get('examDocs_roster'),
+      DB.get('examDocs_answer'),
+      DB.get('examDocs_attend'),
+    ]);
+    if(seat&&seat.length){
+      ED.seating   = seat;
+      ED.routine   = (rout&&rout[0]) ? rout[0] : {h1:[],h2:[]};
+      ED.board1h   = b1||[];
+      ED.board2h   = b2||[];
+      ED.dutycards = duty||[];
+      ED.rosterRows= roster||[];
+      ED.answerRows= ans||[];
+      ED.attendSheets = att||[];
+      ED.roomDiary = edBuildRoomDiary();
+      ED.loaded    = true;
+      if(!silent) showAlert('✅ Data loaded from MongoDB!', 'success');
+      if(st) st.textContent = '✅ Data loaded from DB';
+    } else {
+      if(!silent) showAlert('No saved data found. Please upload Excel file.', 'info');
+      if(st) st.textContent = 'No data in DB — upload Excel file';
+    }
+  } catch(e) {
+    if(!silent) showAlert('Could not load from DB. Upload Excel file.', 'warning');
+    if(st) st.textContent = 'DB unavailable — upload Excel file';
+  }
+}
+
+// ── Print helpers ────────────────────────────────────────────────────────────
+function edHdr(title, right) {
+  return `<div class="ed-hdr"><div class="sn">${ED.school}</div><div class="ss">${ED.examTitle}</div></div>
+  <div class="ed-gold"></div>
+  <div class="ed-info"><span>${title}</span><span>${right||''}</span></div>`;
+}
+function edFoot(text) { return `<div class="ed-foot">${text}</div>`; }
+
+// ── Build HTML generators ────────────────────────────────────────────────────
+function edBuildRoomDiary() {
+  const rooms={};
+  ED.seating.forEach(s => {
+    const key=`${s.room}_${s.half==='1st Half'?'1H':'2H'}`;
+    if(!rooms[key]) rooms[key]={room:s.room,half:s.half,gender:s.gender,classes:[],totalStudents:0,capacity:0};
+    rooms[key].classes.push({cls:s.cls,sec:s.sec,assigned:s.assigned||0,rolls:s.rolls});
+    rooms[key].totalStudents+=(s.assigned||0);
+    rooms[key].capacity=Math.max(rooms[key].capacity,s.capacity||0);
+  });
+  Object.values(rooms).forEach(r => { r.schedule=(r.half==='1st Half')?ED.routine.h1:ED.routine.h2; });
+  return Object.values(rooms).sort((a,b)=>{
+    const ra=parseInt(a.room.replace('R-','')),rb=parseInt(b.room.replace('R-',''));
+    return ra!==rb?ra-rb:(a.half==='1st Half'?0:1)-(b.half==='1st Half'?0:1);
+  });
+}
+
+function edGenRoomDiary() {
+  if(!ED.roomDiary||!ED.roomDiary.length) ED.roomDiary=edBuildRoomDiary();
+  return ED.roomDiary.map(rd => {
+    const hl=rd.half==='1st Half'?'1st Half':'2nd Half';
+    const gl=rd.gender==='BOYS'?'Boys (Section A)':'Girls (Section B)';
+    const sched=rd.schedule||[];
+    const total=rd.totalStudents;
+
+    let classRows='';
+    rd.classes.forEach(c=>{
+      classRows+=`<div class="rd-cr"><span>Cl.${c.cls}–${c.sec}</span><span style="font-weight:700;color:#1B3A6B">${c.assigned||0}</span></div>
+      <div style="font-size:7pt;color:#64748B;padding:1px 3px 3px;border-bottom:.5px solid #C8D8EC">${c.rolls||''}</div>`;
+    });
+
+    let schedRows='';
+    sched.forEach(s=>{ schedRows+=`<div class="rd-sr"><b>Cl.${s.classes}</b> · ${s.time}</div>`; });
+
+    let tableRows='';
+    sched.forEach((s,i)=>{
+      const bg=i%2===0?'#F4F8FF':'#EAF2FF';
+      const dt=String(s.date||'').split('T')[0];
+      const cl=rd.classes.map(c=>`${c.cls}–${c.sec}`).join(', ');
+      tableRows+=`
+      <tr class="tr-d" style="background:${bg}">
+        <td class="td-dt">${dt}<br><span style="font-size:7.5pt;color:#64748B;font-weight:400">(${s.day})</span></td>
+        <td class="td-sb">${s.subject||''}</td>
+        <td class="td-cl">${cl}</td>
+        <td class="td-to">${total}</td>
+        <td></td><td></td>
+        <td style="border:1px solid #B0C4DE"></td>
+      </tr>
+      <tr class="tr-s">
+        <td colspan="3" class="td-sg">Sign. of Invigilator : ___________________________________________</td>
+        <td colspan="1" style="background:#EEF5FF;border:1px solid #B0C4DE"></td>
+        <td colspan="3" class="td-dr">${dt} · ${s.subject}</td>
+      </tr>`;
+    });
+
+    return `<div class="ed-page-land">
+    ${edHdr(`Room Diary · ${rd.room} — ${hl} · ${gl}`,`Students: ${total} | Capacity: ${rd.capacity}`)}
+    <div class="rd-grid">
+      <div class="rd-left">
+        <div class="rd-lt"><div class="big">ROOM<br>DIARY</div><div class="sm">${ED.examTitle}</div></div>
+        <div class="rd-rm"><div class="rn">${rd.room}</div><div class="rs">${hl}</div><div class="rs">${gl}</div></div>
+        <div class="rd-cl">
+          <div class="ch">CLASS · ROLL NOS. · TOTAL</div>${classRows}
+          <div class="rd-tr">TOTAL — ${total}</div>
+        </div>
+        <div class="rd-sc"><div class="sh">EXAM SCHEDULE</div>${schedRows}</div>
+        <div class="rd-in">Invigilator :&nbsp; _________________________<br>Signature &nbsp;&nbsp;:&nbsp; _________________________</div>
+      </div>
+      <div class="rd-right">
+        <table><thead><tr>
+          <th style="">DATE</th><th style="">SUBJECT</th><th style="">CLASS</th>
+          <th style="">TOTAL</th><th style="">PRESENT</th><th style="">ABSENT</th>
+          <th style="">ABSENTEE ROLL NOS.</th>
+        </tr></thead><tbody>${tableRows}</tbody></table>
+      </div>
+    </div>
+    ${edFoot(`${rd.room} · ${hl} · ${gl} · Total Students: ${total}`)}</div>`;
+  }).join('');
+}
+
+function edGenRoutine() {
+  const mkR=(r,i)=>`<tr class="${i%2===0?'ed-td-even':'ed-td-odd'}">
+    <td style="padding:7px 10px;font-weight:700;color:#1B3A6B;font-size:9.5pt;border:1px solid #B0C4DE">${r.date}</td>
+    <td style="padding:7px 10px;font-size:9pt;border:1px solid #B0C4DE">${r.day}</td>
+    <td style="padding:7px 10px;font-weight:700;color:#8B5E0A;font-size:10pt;border:1px solid #B0C4DE">${r.subject}</td>
+    <td style="padding:7px 10px;font-size:9pt;border:1px solid #B0C4DE">${r.classes}</td>
+    <td style="padding:7px 10px;font-size:9pt;font-weight:600;border:1px solid #B0C4DE">${r.time}</td>
+  </tr>`;
+  const TH=`class="ed-th"`;
+  return `<div class="ed-page-land">${edHdr('Examination Programme','')}
+  <div style="padding:14px 16px">
+    <div style="font-size:10pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;padding:8px 12px;border-left:5px solid #1B3A6B;margin-bottom:10px">1st Half — Class V to VIII</div>
+    <table style=";border-collapse:collapse"><thead><tr>
+      <th ${TH} style="">Date</th><th ${TH} style="">Day</th>
+      <th ${TH} style="">Subject</th><th ${TH} style="">For Classes</th><th ${TH} style="">Time</th>
+    </tr></thead><tbody>${ED.routine.h1.map(mkR).join('')}</tbody></table>
+    <div style="font-size:10pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;padding:8px 12px;border-left:5px solid #1B3A6B;margin:16px 0 10px">2nd Half — Class IX &amp; X</div>
+    <table style=";border-collapse:collapse"><thead><tr>
+      <th ${TH} style="">Date</th><th ${TH} style="">Day</th>
+      <th ${TH} style="">Subject</th><th ${TH} style="">For Classes</th><th ${TH} style="">Time</th>
+    </tr></thead><tbody>${ED.routine.h2.map(mkR).join('')}</tbody></table>
+    <div style="margin-top:24px;font-size:9pt;color:#64748B;border-top:1px solid #E2E8F0;padding-top:10px;font-style:italic">SD/– Head of the Institution</div>
+  </div>${edFoot('Ramnagar High School (H.S.) · 1st Summative Evaluation 2026 · Examination Programme')}</div>`;
+}
+
+function edGenBoard(rows, halfLabel) {
+  if(!rows||rows.length<6) return '';
+  const boys=[],girls=[];
+  for(let i=5;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    if(r[0]&&typeof r[0]==='number') boys.push(r);
+    if(r[6]&&typeof r[6]==='number') girls.push(r);
+  }
+  const max=Math.max(boys.length,girls.length);
+  let trows='';
+  for(let i=0;i<max;i++){
+    const b=boys[i]||[],g=girls[i]||[];
+    const bg=i%2===0?'#F4F8FF':'#EAF2FF';
+    trows+=`<tr style="background:${bg}">
+      <td style="padding:4px 7px;font-size:9pt;border:1px solid #B0C4DE;text-align:center">${b[0]||''}</td>
+      <td style="padding:4px 7px;font-size:9.5pt;font-weight:700;color:#1B3A6B;border:1px solid #B0C4DE">${b[1]||''}</td>
+      <td style="padding:4px 7px;font-size:9pt;border:1px solid #B0C4DE">${b[2]||''}</td>
+      <td style="padding:4px 7px;font-size:8.5pt;color:#475569;border:1px solid #B0C4DE">${b[3]||''}</td>
+      <td style="padding:4px 7px;font-size:9.5pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;border:1px solid #B0C4DE;text-align:center">${b[4]||''}</td>
+      <td style="width:6px;background:#1B3A6B"></td>
+      <td style="padding:4px 7px;font-size:9pt;border:1px solid #B0C4DE;text-align:center">${g[0]||''}</td>
+      <td style="padding:4px 7px;font-size:9.5pt;font-weight:700;color:#7C1D48;border:1px solid #B0C4DE">${g[1]||''}</td>
+      <td style="padding:4px 7px;font-size:9pt;border:1px solid #B0C4DE">${g[2]||''}</td>
+      <td style="padding:4px 7px;font-size:8.5pt;color:#475569;border:1px solid #B0C4DE">${g[3]||''}</td>
+      <td style="padding:4px 7px;font-size:9.5pt;font-weight:700;color:#7C1D48;background:#FCE7F3;border:1px solid #B0C4DE;text-align:center">${g[4]||''}</td>
+    </tr>`;
+  }
+  const TH=(c,bg='#1B3A6B')=>`style="background:${bg};color:white;padding:7px 7px;font-size:${bg==='#1B3A6B'?'9.5':'8.5'}pt;font-weight:700;border:1px solid #0F2850"`;
+  return `<div class="ed-page-land">${edHdr(`Room Allotment Notice Board — ${halfLabel}`,`Boys: ${boys.length} | Girls: ${girls.length}`)}
+  <div style="padding:6px 10px">
+    <table style=";border-collapse:collapse"><thead>
+      <tr><th ${TH(5)} colspan="5">BOYS — Section A</th><td style="width:6px;background:#1B3A6B"></td><th ${TH(5,'#7C1D48')} colspan="5">GIRLS — Section B</th></tr>
+      <tr>${['SL','Roll No.','Name','Class','Room','','SL','Roll No.','Name','Class','Room'].map((h,i)=>
+        i===5?`<td style="background:#1B3A6B;width:6px"></td>`:
+        `<th style="background:${i<5?'#2C4F8C':'#9D174D'};color:white;padding:5px 7px;font-size:8.5pt;font-weight:600;border:1px solid ${i<5?'#1B3A6B':'#7C1D48'}">${h}</th>`
+      ).join('')}</tr>
+    </thead><tbody>${trows}</tbody></table>
+  </div>${edFoot(`Room Allotment Notice Board · ${halfLabel} · Ramnagar High School (H.S.)`)}</div>`;
+}
+
+function edGenDutyCards() {
+  return ED.dutycards.map(t=>{
+    const rows=t.duties.map((d,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
+      <td style="padding:6px 8px;font-size:9pt;text-align:center;border:1px solid #B0C4DE;font-weight:600">${d.sl}</td>
+      <td style="padding:6px 8px;font-size:9.5pt;font-weight:700;color:#1B3A6B;border:1px solid #B0C4DE">${d.date}</td>
+      <td style="padding:6px 8px;font-size:9pt;border:1px solid #B0C4DE">${d.day}</td>
+      <td style="padding:6px 8px;text-align:center;border:1px solid #B0C4DE">
+        <span style="background:${d.half==='1H'?'#DCE9F8':'#FCE7F3'};color:${d.half==='1H'?'#1B3A6B':'#7C1D48'};padding:2px 9px;border-radius:99px;font-size:8.5pt;font-weight:700">${d.half}</span>
+      </td>
+      <td style="padding:6px 8px;font-size:10pt;font-weight:700;color:#1B3A6B;text-align:center;background:#DCE9F8;border:1px solid #B0C4DE">${d.room}</td>
+      <td style="padding:6px 8px;font-size:9.5pt;font-weight:700;color:#8B5E0A;border:1px solid #B0C4DE">${d.subject}</td>
+      <td style="padding:6px 8px;border:1px solid #B0C4DE"></td>
+    </tr>`).join('');
+    const TH=`class="ed-th"`;
+    return `<div class="ed-page-port">${edHdr(`Individual Duty Card — ${t.name}`,`Total Duties: ${t.totalDuties}`)}
+    <div style="padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:8px 12px;background:#DCE9F8;border-left:5px solid #1B3A6B">
+        <div style="font-size:11pt;font-weight:700;color:#1B3A6B;font-family:'Crimson Pro',serif">${t.name}</div>
+        <div style="font-size:9pt;color:#475569">Signature: ___________________________________</div>
+      </div>
+      <table style=";border-collapse:collapse"><thead><tr>
+        <th ${TH} style="">SL</th><th ${TH} style="">Date</th><th ${TH} style="">Day</th>
+        <th ${TH} style="">Half</th><th ${TH} style="">Room</th>
+        <th ${TH} style="">Subject</th><th ${TH} style="">Sign</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div>${edFoot(`Duty Card · ${t.name} · Total Duties: ${t.totalDuties} · Ramnagar High School (H.S.)`)}</div>`;
+  }).join('');
+}
+
+function edGenRoster() {
+  let drows='';
+  ED.rosterRows.forEach(r=>{
+    if(!r||!r[0]) return;
+    const a=String(r[0]);
+    if(a.match(/^\d{2}-\d{2}-20/)||(a.includes('(')&&a.includes('-')))
+      drows+=`<tr><td colspan="10" style="background:#1B3A6B;color:white;font-size:9pt;font-weight:700;padding:6px 10px">${a}</td></tr>`;
+    else if(a.startsWith('  ')&&a.includes('Half'))
+      drows+=`<tr><td colspan="10" style="background:#DCE9F8;color:#1B3A6B;font-size:8.5pt;font-weight:700;padding:5px 10px;border-left:4px solid #1B3A6B">${a.trim()}</td></tr>`;
+    else if(typeof r[0]==='number'){
+      const bg=r[0]%2===0?'#F4F8FF':'#EAF2FF';
+      drows+=`<tr style="background:${bg}">${[r[0],r[1],r[2],r[3],r[4],r[5],r[6],r[7]].map((v,ci)=>
+        `<td style="padding:5px 7px;font-size:${ci>=6?'8.5':'9'}pt;${ci===4?'font-weight:700;color:#1B3A6B;background:#DCE9F8;text-align:center':ci===5?'font-weight:700;color:#8B5E0A':'font-weight:500'};border:1px solid #B0C4DE">${v||''}</td>`
+      ).join('')}<td style="padding:5px 7px;border:1px solid #B0C4DE"></td><td style="padding:5px 7px;border:1px solid #B0C4DE"></td></tr>`;
+    }
+  });
+  const TH=`class="ed-th"`;
+  return `<div class="ed-page-land">${edHdr('Invigilator Duty Roster','')}
+  <div style="padding:8px 10px">
+    <table style=";border-collapse:collapse"><thead><tr>
+      <th ${TH} style="">SL</th><th ${TH} style="">Date</th><th ${TH} style="">Day</th>
+      <th ${TH} style="">Half</th><th ${TH} style="">Room</th><th ${TH} style="">Subject</th>
+      <th ${TH} style="">Invigilator 1</th><th ${TH} style="">Invigilator 2</th>
+      <th ${TH} style="">Sign 1</th><th ${TH} style="">Sign 2</th>
+    </tr></thead><tbody>${drows}</tbody></table>
+  </div>${edFoot('Invigilator Duty Roster · Ramnagar High School (H.S.) · 1st Summative Evaluation 2026')}</div>`;
+}
+
+function edGenAnswerScript() {
+  let html='',cls='',trows='';
+  const flush=()=>{
+    if(!trows) return;
+    const TH=`class="ed-th"`;
+    html+=`<div style="margin-bottom:18px">
+      <div style="font-size:10.5pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;padding:7px 12px;border-left:5px solid #C9A84C;margin-bottom:7px">${cls}</div>
+      <table style=";border-collapse:collapse"><thead><tr>
+        <th ${TH} style="">SL</th><th ${TH} style="">Subject</th>
+        <th ${TH} style="">Total Copies</th><th ${TH} style="">Teacher's Name</th><th ${TH} style="">Signature</th>
+      </tr></thead><tbody>${trows}</tbody></table></div>`;
+    trows='';
+  };
+  ED.answerRows.forEach(r=>{
+    if(!r||!r[0]) return;
+    const a=String(r[0]);
+    if(a.startsWith('  Class')||a.startsWith('Class')){flush();cls=a.trim();}
+    else if(typeof r[0]==='number'&&r[1]){
+      const bg=r[0]%2===0?'#F4F8FF':'#EAF2FF';
+      trows+=`<tr style="background:${bg}">
+        <td style="padding:6px 8px;font-size:9pt;text-align:center;font-weight:600;border:1px solid #B0C4DE">${r[0]}</td>
+        <td style="padding:6px 8px;font-size:9.5pt;font-weight:700;color:#8B5E0A;border:1px solid #B0C4DE">${r[1]}</td>
+        <td style="padding:6px 8px;font-size:9pt;text-align:center;border:1px solid #B0C4DE"></td>
+        <td style="padding:6px 8px;font-size:9.5pt;border:1px solid #B0C4DE">${r[3]||''}</td>
+        <td style="padding:6px 8px;border:1px solid #B0C4DE"></td>
+      </tr>`;
+    }
+  });
+  flush();
+  return `<div class="ed-page-port">${edHdr('Distribution of Answer Scripts','')}
+  <div style="padding:12px 14px">${html}</div>${edFoot('Answer Script Distribution · 1st Summative Evaluation 2026 · Ramnagar High School (H.S.)')}</div>`;
+}
+
+function edGenSeating() {
+  const h1b=ED.seating.filter(s=>s.half==='1st Half'&&s.gender==='BOYS');
+  const h1g=ED.seating.filter(s=>s.half==='1st Half'&&s.gender==='GIRLS');
+  const h2b=ED.seating.filter(s=>s.half==='2nd Half'&&s.gender==='BOYS');
+  const h2g=ED.seating.filter(s=>s.half==='2nd Half'&&s.gender==='GIRLS');
+  const mkT=(rows,title,col='#1B3A6B')=>{
+    if(!rows.length) return '';
+    const TH=`class="ed-th"`;
+    const tr=rows.map((r,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
+      <td style="padding:6px 10px;font-size:10pt;font-weight:700;color:#1B3A6B;border:1px solid #B0C4DE">${r.room}</td>
+      <td style="padding:6px 10px;font-size:9.5pt;font-weight:600;border:1px solid #B0C4DE">${r.cls}–${r.sec}</td>
+      <td style="padding:6px 10px;text-align:center;background:#DCE9F8;font-weight:700;color:#1B3A6B;font-size:10pt;border:1px solid #B0C4DE">${r.assigned||0}</td>
+      <td style="padding:6px 10px;text-align:center;font-size:9.5pt;border:1px solid #B0C4DE">${r.capacity||0}</td>
+      <td style="padding:6px 10px;text-align:center;font-size:9.5pt;font-weight:600;color:${(r.vacant||0)>0?'#DC2626':'#059669'};border:1px solid #B0C4DE">${r.vacant||0}</td>
+      <td style="padding:6px 10px;font-size:8.5pt;color:#334155;border:1px solid #B0C4DE">${r.rolls||''}</td>
+    </tr>`).join('');
+    return `<div style="margin-bottom:16px">
+      <div style="font-size:10pt;font-weight:700;color:${col};background:${col==='#1B3A6B'?'#DCE9F8':'#FCE7F3'};padding:7px 12px;border-left:5px solid ${col};margin-bottom:7px">${title}</div>
+      <table style=";border-collapse:collapse"><thead><tr>
+        <th ${TH} style="">Room</th><th ${TH} style="">Class</th><th ${TH} style="">Assigned</th>
+        <th ${TH} style="">Capacity</th><th ${TH} style="">Vacant</th><th ${TH} style="">Roll Numbers</th>
+      </tr></thead><tbody>${tr}</tbody></table></div>`;
+  };
+  return `<div class="ed-page-land">${edHdr('Seating Arrangement — 1st Half','')}
+  <div style="padding:12px 14px">${mkT(h1b,'1st Half — Boys (Section A)','#1B3A6B')}${mkT(h1g,'1st Half — Girls (Section B)','#7C1D48')}</div>
+  ${edFoot('Seating Arrangement · 1st Half · Ramnagar High School (H.S.)')}</div>
+  <div class="ed-page-land">${edHdr('Seating Arrangement — 2nd Half','')}
+  <div style="padding:12px 14px">${mkT(h2b,'2nd Half — Boys (Section A)','#1B3A6B')}${mkT(h2g,'2nd Half — Girls (Section B)','#7C1D48')}</div>
+  ${edFoot('Seating Arrangement · 2nd Half · Ramnagar High School (H.S.)')}</div>`;
+}
+
+function edGenAttendance() {
+  return ED.attendSheets.map(sheet=>{
+    const rows=sheet.rows;
+    const t3=rows[2]?String(rows[2][0]||''):'';
+    const dm=t3.match(/Date : ([\d-]+)/), sm=t3.match(/Subject : ([^|]+)/), tm=t3.match(/Time : (.+)/);
+    const dt=dm?dm[1]:'', subj=sm?sm[1].trim():'', time=tm?tm[1].trim():'';
+    const half=rows[1]?String(rows[1][0]||''):'';
+    let drows='',idx=0;
+    for(let i=5;i<rows.length;i++){
+      const r=rows[i]; if(!r||!r[0]) continue;
+      const a=String(r[0]);
+      if(a.includes('BOYS')||a.includes('GIRLS')){
+        drows+=`<tr><td colspan="7" style="background:${a.includes('BOYS')?'#1B3A6B':'#7C1D48'};color:white;padding:6px 10px;font-size:9pt;font-weight:700">${a}</td></tr>`;
+        idx=0;continue;
+      }
+      if(a.startsWith('R-')){
+        const bg=idx++%2===0?'#F4F8FF':'#EAF2FF';
+        drows+=`<tr style="background:${bg}">
+          <td style="padding:5px 8px;font-size:10pt;font-weight:700;color:#1B3A6B;border:1px solid #B0C4DE">${r[0]}</td>
+          <td style="padding:5px 8px;font-size:9.5pt;font-weight:700;border:1px solid #B0C4DE">${r[1]||''}</td>
+          <td style="padding:5px 8px;font-size:8.5pt;color:#334155;border:1px solid #B0C4DE">${r[2]||''}</td>
+          <td style="padding:5px 8px;text-align:center;font-weight:700;color:#1B3A6B;background:#DCE9F8;font-size:10pt;border:1px solid #B0C4DE">${r[3]||''}</td>
+          <td style="padding:5px 8px;border:1px solid #B0C4DE"></td><td style="padding:5px 8px;border:1px solid #B0C4DE"></td><td style="padding:5px 8px;border:1px solid #B0C4DE"></td>
+        </tr>`;
+      } else if(r[1]&&!a.includes('Section')){
+        const bg=idx%2===0?'#F4F8FF':'#EAF2FF';
+        drows+=`<tr style="background:${bg}">
+          <td style="padding:5px 8px;border:1px solid #B0C4DE"></td>
+          <td style="padding:5px 8px;font-size:9.5pt;font-weight:700;border:1px solid #B0C4DE">${r[1]||''}</td>
+          <td style="padding:5px 8px;font-size:8.5pt;color:#334155;border:1px solid #B0C4DE">${r[2]||''}</td>
+          <td style="padding:5px 8px;text-align:center;font-weight:700;color:#1B3A6B;background:#DCE9F8;font-size:10pt;border:1px solid #B0C4DE">${r[3]||''}</td>
+          <td style="padding:5px 8px;border:1px solid #B0C4DE"></td><td style="padding:5px 8px;border:1px solid #B0C4DE"></td><td style="padding:5px 8px;border:1px solid #B0C4DE"></td>
+        </tr>`;
+      }
+    }
+    const TH=`class="ed-th"`;
+    return `<div class="ed-page-land">${edHdr(`${half}`,`${dt} · ${subj} · ${time}`)}
+    <div style="padding:8px 10px">
+      <table style=";border-collapse:collapse"><thead><tr>
+        <th ${TH} style="">Room No.</th><th ${TH} style="">Class &amp; Sec</th>
+        <th ${TH} style="">Actual Roll Nos. Assigned</th><th ${TH} style="">Total Assigned</th>
+        <th ${TH} style="">Absentee Roll Nos.</th><th ${TH} style="">Total Present</th><th ${TH} style="">Invigilator Sign</th>
+      </tr></thead><tbody>${drows}</tbody></table>
+    </div>${edFoot(`${dt} · ${subj} · ${half} · Ramnagar High School (H.S.)`)}</div>`;
+  }).join('');
+}
+
+// ── Print Settings & Live Preview ────────────────────────────────────────────
+let _edPrintType = '';
+let _edPrintHtml = '';
+
+function edShowPrintSettings(type) {
+  if(!ED.loaded){ showAlert('Please upload Excel file or load from MongoDB first.','error'); return; }
+  _edPrintType = type;
+
+  // Build raw html
+  switch(type){
+    case 'roomdiary':    _edPrintHtml=edGenRoomDiary(); break;
+    case 'seating':      _edPrintHtml=edGenSeating(); break;
+    case 'board1h':      _edPrintHtml=edGenBoard(ED.board1h,'1st Half'); break;
+    case 'board2h':      _edPrintHtml=edGenBoard(ED.board2h,'2nd Half'); break;
+    case 'routine':      _edPrintHtml=edGenRoutine(); break;
+    case 'dutycards':    _edPrintHtml=edGenDutyCards(); break;
+    case 'roster':       _edPrintHtml=edGenRoster(); break;
+    case 'answerscript': _edPrintHtml=edGenAnswerScript(); break;
+    case 'attendance':   _edPrintHtml=edGenAttendance(); break;
+    case 'all':
+      _edPrintHtml=[edGenRoutine(),edGenSeating(),
+        edGenBoard(ED.board1h,'1st Half'),edGenBoard(ED.board2h,'2nd Half'),
+        edGenRoomDiary(),edGenAttendance(),edGenRoster(),
+        edGenDutyCards(),edGenAnswerScript()].join(''); break;
+    default: showAlert('Unknown type','error'); return;
+  }
+  if(!_edPrintHtml){ showAlert('No data. Upload Excel first.','warning'); return; }
+
+  const isPort = (type==='dutycards'||type==='answerscript');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ed-preview-overlay';
+  overlay.style.cssText = `position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.7);display:flex;flex-direction:column;`;
+  overlay.innerHTML = `
+  <!-- Top bar -->
+  <div style="background:#1e293b;color:#f1f5f9;padding:10px 20px;display:flex;align-items:center;gap:16px;flex-shrink:0;border-bottom:1px solid #334155">
+    <div style="font-size:15px;font-weight:700">🖨️ Print Preview — <span style="color:#93c5fd">${edDocLabel(type)}</span></div>
+    <div style="flex:1"></div>
+    <button onclick="edDoPrintFinal()" style="background:#2563eb;color:white;border:none;padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">🖨️ Print</button>
+    <button onclick="document.getElementById('ed-preview-overlay').remove()" style="background:#334155;color:#f1f5f9;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit">✕ Close</button>
+  </div>
+
+  <!-- Body: settings left, preview right -->
+  <div style="display:flex;flex:1;overflow:hidden">
+
+    <!-- Settings Panel -->
+    <div style="width:280px;background:#1e293b;padding:16px;overflow-y:auto;flex-shrink:0;border-right:1px solid #334155">
+
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Page</div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Orientation</div>
+        <select id="ps-orient" onchange="edUpdatePreview()" style="width:100%;padding:7px 8px;border-radius:6px;background:#334155;color:#f1f5f9;border:1px solid #475569;font-size:12px;font-family:inherit">
+          <option value="landscape" ${!isPort?'selected':''}>Landscape</option>
+          <option value="portrait"  ${isPort ?'selected':''}>Portrait</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Margins (mm)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          ${[['Top','mt',0],['Right','mr',0],['Bottom','mb',0],['Left','ml',0]].map(([l,id,v])=>`
+          <div>
+            <div style="font-size:10px;color:#64748b;margin-bottom:2px">${l}</div>
+            <input id="ps-${id}" type="number" value="${v}" min="0" max="25" step="1" onchange="edUpdatePreview()"
+              style="width:100%;padding:5px 6px;border-radius:5px;background:#334155;color:#f1f5f9;border:1px solid #475569;font-size:12px;text-align:center;font-family:inherit">
+          </div>`).join('')}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+          <button onclick="['mt','mr','mb','ml'].forEach(x=>document.getElementById('ps-'+x).value=0);edUpdatePreview()"
+            style="padding:5px;border-radius:5px;background:#0f172a;color:#94a3b8;border:1px solid #334155;font-size:11px;cursor:pointer;font-family:inherit">0mm (Edge)</button>
+          <button onclick="['mt','mr','mb','ml'].forEach(x=>document.getElementById('ps-'+x).value=8);edUpdatePreview()"
+            style="padding:5px;border-radius:5px;background:#0f172a;color:#94a3b8;border:1px solid #334155;font-size:11px;cursor:pointer;font-family:inherit">8mm Normal</button>
+        </div>
+      </div>
+
+      <div style="height:1px;background:#334155;margin:12px 0"></div>
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Typography</div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Header Font Size (pt)</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="ps-hdr-fs" type="range" min="10" max="18" value="15" step="0.5" onchange="edUpdatePreview()"
+            style="flex:1;accent-color:#2563eb">
+          <span id="ps-hdr-fs-val" style="font-size:12px;color:#f1f5f9;min-width:28px">15pt</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Table Header Font (pt)</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="ps-th-fs" type="range" min="6" max="13" value="9" step="0.5" onchange="edUpdatePreview()"
+            style="flex:1;accent-color:#2563eb">
+          <span id="ps-th-fs-val" style="font-size:12px;color:#f1f5f9;min-width:28px">9pt</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Data Cell Font (pt)</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="ps-td-fs" type="range" min="6" max="13" value="9" step="0.5" onchange="edUpdatePreview()"
+            style="flex:1;accent-color:#2563eb">
+          <span id="ps-td-fs-val" style="font-size:12px;color:#f1f5f9;min-width:28px">9pt</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Row Height (px)</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="ps-row-h" type="range" min="16" max="50" value="28" step="1" onchange="edUpdatePreview()"
+            style="flex:1;accent-color:#2563eb">
+          <span id="ps-row-h-val" style="font-size:12px;color:#f1f5f9;min-width:32px">28px</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Cell Padding (px)</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input id="ps-pad" type="range" min="2" max="12" value="4" step="1" onchange="edUpdatePreview()"
+            style="flex:1;accent-color:#2563eb">
+          <span id="ps-pad-val" style="font-size:12px;color:#f1f5f9;min-width:28px">4px</span>
+        </div>
+      </div>
+
+      <div style="height:1px;background:#334155;margin:12px 0"></div>
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Row Heights</div>
+
+      ${[
+        ['Data Row','row-h','28','16','60'],
+        ['Sign Row','sign-h','14','8','30'],
+        ['Header Row','hdr-h','22','14','40'],
+      ].map(([lbl,id,def,min,max])=>`
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <div style="font-size:11px;color:#94a3b8">${lbl}</div>
+          <span id="ps-${id}-val" style="font-size:11px;color:#f1f5f9;min-width:32px;text-align:right">${def}px</span>
+        </div>
+        <input id="ps-${id}" type="range" min="${min}" max="${max}" value="${def}" step="1" oninput="document.getElementById('ps-${id}-val').textContent=this.value+'px'" onchange="edUpdatePreview()"
+          style="width:100%;accent-color:#2563eb">
+      </div>`).join('')}
+
+      <div style="height:1px;background:#334155;margin:12px 0"></div>
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Column Widths (%)</div>
+      <div style="font-size:10px;color:#475569;margin-bottom:8px">Attendance / Roster / Board columns</div>
+
+      ${[
+        ['Room No.','cw1','8'],
+        ['Class/Sec','cw2','11'],
+        ['Roll Nos.','cw3','27'],
+        ['Total','cw4','10'],
+        ['Absentee','cw5','18'],
+        ['Present','cw6','11'],
+        ['Inv. Sign','cw7','15'],
+      ].map(([lbl,id,def])=>`
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+        <div style="font-size:10px;color:#94a3b8;width:60px;flex-shrink:0">${lbl}</div>
+        <input id="ps-${id}" type="number" value="${def}" min="4" max="60" step="1" onchange="edUpdatePreview()"
+          style="flex:1;padding:4px 5px;border-radius:4px;background:#334155;color:#f1f5f9;border:1px solid #475569;font-size:11px;text-align:center;font-family:inherit">
+        <span style="font-size:10px;color:#475569">%</span>
+      </div>`).join('')}
+
+      <div style="height:1px;background:#334155;margin:12px 0"></div>
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Room Diary Left Panel</div>
+
+      ${[
+        ['Panel Width','rd-pw','148','80','220','px'],
+        ['Room No Size','rd-rs','22','12','32','pt'],
+      ].map(([lbl,id,def,min,max,unit])=>`
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+          <div style="font-size:11px;color:#94a3b8">${lbl}</div>
+          <span id="ps-${id}-val" style="font-size:11px;color:#f1f5f9;min-width:36px;text-align:right">${def}${unit}</span>
+        </div>
+        <input id="ps-${id}" type="range" min="${min}" max="${max}" value="${def}" step="1" oninput="document.getElementById('ps-${id}-val').textContent=this.value+'${unit}'" onchange="edUpdatePreview()"
+          style="width:100%;accent-color:#2563eb">
+      </div>`).join('')}
+
+      <div style="height:1px;background:#334155;margin:12px 0"></div>
+      <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Colors</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+        <div>
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">Header BG</div>
+          <input id="ps-hdr-bg" type="color" value="#1B3A6B" onchange="edUpdatePreview()"
+            style="width:100%;height:32px;border:none;border-radius:5px;cursor:pointer;background:none">
+        </div>
+        <div>
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">Gold Accent</div>
+          <input id="ps-gold" type="color" value="#C9A84C" onchange="edUpdatePreview()"
+            style="width:100%;height:32px;border:none;border-radius:5px;cursor:pointer;background:none">
+        </div>
+        <div>
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">Info Bar BG</div>
+          <input id="ps-info-bg" type="color" value="#DCE9F8" onchange="edUpdatePreview()"
+            style="width:100%;height:32px;border:none;border-radius:5px;cursor:pointer;background:none">
+        </div>
+        <div>
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">Row Even BG</div>
+          <input id="ps-row-even" type="color" value="#F4F8FF" onchange="edUpdatePreview()"
+            style="width:100%;height:32px;border:none;border-radius:5px;cursor:pointer;background:none">
+        </div>
+        <div>
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">Row Odd BG</div>
+          <input id="ps-row-odd" type="color" value="#EAF2FF" onchange="edUpdatePreview()"
+            style="width:100%;height:32px;border:none;border-radius:5px;cursor:pointer;background:none">
+        </div>
+        <div>
+          <div style="font-size:10px;color:#94a3b8;margin-bottom:3px">Table Header BG</div>
+          <input id="ps-th-bg" type="color" value="#1B3A6B" onchange="edUpdatePreview()"
+            style="width:100%;height:32px;border:none;border-radius:5px;cursor:pointer;background:none">
+        </div>
+      </div>
+
+      <div style="height:1px;background:#334155;margin:12px 0"></div>
+      <button onclick="edResetSettings()" style="width:100%;padding:7px;border-radius:6px;background:#0f172a;color:#94a3b8;border:1px solid #334155;font-size:12px;cursor:pointer;font-family:inherit">↺ Reset to Default</button>
+    </div>
+
+    <!-- Preview Pane -->
+    <div style="flex:1;overflow:auto;background:#e2e8f0;padding:20px;display:flex;justify-content:center">
+      <iframe id="ed-preview-frame" style="background:white;border:none;box-shadow:0 4px 24px rgba(0,0,0,0.2);width:100%;max-width:900px;height:100%;min-height:600px" sandbox="allow-same-origin"></iframe>
+    </div>
+  </div>`;
+
+  document.body.appendChild(overlay);
+  // sync slider labels
+  ['hdr-fs','th-fs','td-fs','row-h','pad'].forEach(id=>{
+    const el=document.getElementById('ps-'+id);
+    if(el) el.addEventListener('input',()=>{ document.getElementById('ps-'+id+'-val').textContent=el.value+(id.includes('fs')?'pt':'px'); });
+  });
+  edUpdatePreview();
+}
+
+function edGetPrintCSS() {
+  const g = id => document.getElementById(id)?.value;
+  return {
+    hdrBg:   g('ps-hdr-bg')   || '#1B3A6B',
+    gold:    g('ps-gold')     || '#C9A84C',
+    infoBg:  g('ps-info-bg')  || '#DCE9F8',
+    rowEven: g('ps-row-even') || '#F4F8FF',
+    rowOdd:  g('ps-row-odd')  || '#EAF2FF',
+    thBg:    g('ps-th-bg')    || '#1B3A6B',
+    hdrFs:   g('ps-hdr-fs')   || 15,
+    thFs:    g('ps-th-fs')    || 9,
+    tdFs:    g('ps-td-fs')    || 9,
+    rowH:    g('ps-row-h')    || 28,
+    signH:   g('ps-sign-h')   || 14,
+    hdrH:    g('ps-hdr-h')    || 22,
+    pad:     g('ps-pad')      || 4,
+    orient:  g('ps-orient')   || 'landscape',
+    mt:      g('ps-mt') || 0,  mr: g('ps-mr') || 0,
+    mb:      g('ps-mb') || 0,  ml: g('ps-ml') || 0,
+    // Column widths %
+    cw1: g('ps-cw1')||8,  cw2: g('ps-cw2')||11, cw3: g('ps-cw3')||27,
+    cw4: g('ps-cw4')||10, cw5: g('ps-cw5')||18, cw6: g('ps-cw6')||11,
+    cw7: g('ps-cw7')||15,
+    // Room diary
+    rdPw: g('ps-rd-pw')||148,
+    rdRs: g('ps-rd-rs')||22,
+  };
+}
+
+function edBuildFullHtml(html, cfg) {
+  const {hdrBg,gold,infoBg,rowEven,rowOdd,thBg,hdrFs,thFs,tdFs,
+         rowH,signH,hdrH,pad,orient,mt,mr,mb,ml,
+         cw1,cw2,cw3,cw4,cw5,cw6,cw7,rdPw,rdRs} = cfg;
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+@page{size:A4 ${orient};margin:${mt}mm ${mr}mm ${mb}mm ${ml}mm;}
+@media print{
+  html,body{width:100%;margin:0;padding:0;}
+  .ed-page-land,.ed-page-port{width:100%;height:auto;page-break-after:always;page-break-inside:avoid;}
+  .ed-page-land:last-child,.ed-page-port:last-child{page-break-after:avoid;}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
+}
+html,body{background:white;font-family:'DM Sans','Inter',sans-serif;width:100%;margin:0;padding:0;}
+.ed-page-land,.ed-page-port{width:100%;height:auto;background:white;color:#0F1E35;display:block;}
+.ed-hdr{background:${hdrBg};color:white;padding:7px 14px 5px;}
+.ed-hdr .sn{font-family:'Crimson Pro','Georgia',serif;font-size:${hdrFs}pt;font-weight:700;text-align:center;letter-spacing:0.8px;}
+.ed-hdr .ss{font-size:8pt;text-align:center;color:rgba(255,255,255,.7);margin-top:2px;}
+.ed-gold{height:3px;background:${gold};}
+.ed-info{background:${infoBg};padding:5px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1.5px solid ${hdrBg};}
+.ed-info span{font-size:8.5pt;color:${hdrBg};font-weight:600;}
+.ed-foot{background:${hdrBg};color:white;padding:5px 14px;font-size:8pt;text-align:center;font-weight:500;letter-spacing:0.4px;}
+
+/* Room Diary */
+.rd-grid{display:grid;grid-template-columns:${rdPw}px 1fr;width:100%;}
+.rd-left{border-right:2px solid ${hdrBg};display:flex;flex-direction:column;}
+.rd-lt{background:${gold}33;padding:8px 6px 6px;text-align:center;border-bottom:2px solid ${gold};}
+.rd-lt .big{font-family:'Crimson Pro','Georgia',serif;font-size:17pt;font-weight:700;color:${hdrBg};line-height:1.1;}
+.rd-lt .sm{font-size:7.5pt;color:#2C4F8C;margin-top:2px;}
+.rd-rm{background:${hdrBg};color:white;text-align:center;padding:12px 6px;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.rd-rm .rn{font-family:'Crimson Pro','Georgia',serif;font-size:${rdRs}pt;font-weight:700;line-height:1;}
+.rd-rm .rs{font-size:8.5pt;color:#B0C4DE;margin-top:5px;line-height:1.5;}
+.rd-cl{background:${infoBg};border-top:1.5px solid #B0C4DE;padding:5px 6px;}
+.rd-cl .ch{font-size:7.5pt;font-weight:700;text-align:center;background:${thBg};color:white;padding:3px 4px;margin-bottom:4px;}
+.rd-cr{display:flex;justify-content:space-between;align-items:baseline;font-size:${Math.max(7,tdFs-1)}pt;font-weight:600;color:${hdrBg};padding:2px 3px;border-bottom:.5px solid #C8D8EC;}
+.rd-tr{background:${hdrBg};color:white;text-align:center;font-size:8.5pt;font-weight:700;padding:3px 4px;margin-top:3px;}
+.rd-sc{border-top:2px solid ${gold};background:${gold}18;padding:5px 6px;}
+.rd-sc .sh{font-size:7.5pt;font-weight:700;text-align:center;background:${gold};color:${hdrBg};padding:2px 4px;margin-bottom:4px;}
+.rd-sr{font-size:7.5pt;color:#334155;padding:2px;border-bottom:.5px dotted ${gold}88;line-height:1.4;}
+.rd-in{border-top:1.5px solid #B0C4DE;background:#F7F9FC;padding:7px 8px;font-size:8pt;color:#0F1E35;font-weight:500;line-height:2.2;}
+.rd-right{display:block;}
+.rd-right table{width:100%;border-collapse:collapse;}
+.rd-right th{background:${thBg};color:white;font-size:${thFs}pt;font-weight:700;text-align:center;padding:${pad}px;border:1px solid ${hdrBg}88;}
+.rd-right td{font-size:${tdFs}pt;text-align:center;padding:${pad}px;border:1px solid #B0C4DE;vertical-align:middle;font-weight:500;}
+.td-dt{font-weight:700;color:${hdrBg};line-height:1.4;}
+.td-sb{font-weight:700;color:#8B5E0A;}
+.td-cl{font-weight:700;color:${hdrBg};}
+.td-to{background:${infoBg};font-weight:700;color:${hdrBg};}
+.td-sg{background:#FFF8EE;color:#64748B;text-align:left;padding-left:8px;font-style:italic;}
+.td-dr{background:${infoBg};color:#2C4F8C;font-style:italic;}
+.tr-d td{height:${rowH}px;}
+.tr-s td{height:${signH}px;}
+
+/* Common table */
+.ed-th{background:${thBg};color:white;padding:${pad+3}px ${pad+4}px;font-size:${thFs}pt;font-weight:700;border:1px solid ${hdrBg}88;text-align:left;}
+.ed-td-even{background:${rowEven};}
+.ed-td-odd{background:${rowOdd};}
+table{border-collapse:collapse;width:100%;}
+th{font-size:${thFs}pt;padding:${pad+3}px ${pad+2}px;height:${hdrH}px;word-break:break-word;}
+td{font-size:${tdFs}pt;padding:${pad}px ${pad+2}px;height:${rowH}px;word-break:break-word;}
+
+/* Attendance / Roster column widths */
+.att-table th:nth-child(1),.att-table td:nth-child(1){width:${cw1}%}
+.att-table th:nth-child(2),.att-table td:nth-child(2){width:${cw2}%}
+.att-table th:nth-child(3),.att-table td:nth-child(3){width:${cw3}%}
+.att-table th:nth-child(4),.att-table td:nth-child(4){width:${cw4}%}
+.att-table th:nth-child(5),.att-table td:nth-child(5){width:${cw5}%}
+.att-table th:nth-child(6),.att-table td:nth-child(6){width:${cw6}%}
+.att-table th:nth-child(7),.att-table td:nth-child(7){width:${cw7}%}
+</style></head><body>${html}</body></html>`;
+}
+
+
+function edUpdatePreview() {
+  // sync slider labels
+  ['hdr-fs','th-fs','td-fs','row-h','pad'].forEach(id=>{
+    const el=document.getElementById('ps-'+id);
+    const lbl=document.getElementById('ps-'+id+'-val');
+    if(el&&lbl) lbl.textContent=el.value+(id.includes('fs')?'pt':'px');
+  });
+  const cfg = edGetPrintCSS();
+  const fullHtml = edBuildFullHtml(_edPrintHtml, cfg);
+  const frame = document.getElementById('ed-preview-frame');
+  if(!frame) return;
+  // Use srcdoc — works on file:// without security errors
+  frame.srcdoc = fullHtml;
+}
+
+function edResetSettings() {
+  const def = {
+    'ps-hdr-bg':'#1B3A6B','ps-gold':'#C9A84C','ps-info-bg':'#DCE9F8',
+    'ps-row-even':'#F4F8FF','ps-row-odd':'#EAF2FF','ps-th-bg':'#1B3A6B',
+    'ps-hdr-fs':'15','ps-th-fs':'9','ps-td-fs':'9',
+    'ps-row-h':'28','ps-sign-h':'14','ps-hdr-h':'22','ps-pad':'4',
+    'ps-mt':'0','ps-mr':'0','ps-mb':'0','ps-ml':'0',
+    'ps-cw1':'8','ps-cw2':'11','ps-cw3':'27','ps-cw4':'10',
+    'ps-cw5':'18','ps-cw6':'11','ps-cw7':'15',
+    'ps-rd-pw':'148','ps-rd-rs':'22',
+  };
+  Object.entries(def).forEach(([id,val])=>{
+    const el=document.getElementById(id); if(el) el.value=val;
+  });
+  edUpdatePreview();
+}
+
+function edDoPrintFinal() {
+  const cfg = edGetPrintCSS();
+  const fullHtml = edBuildFullHtml(_edPrintHtml, cfg);
+  const pw = window.open('','_blank',`width=${cfg.orient==='landscape'?1100:800},height=900`);
+  if(!pw){ showAlert('Popup blocked! Allow popups for this site.','error'); return; }
+  pw.document.open();
+  pw.document.write(fullHtml.replace('</body>',`<script>
+    if(document.fonts&&document.fonts.ready){
+      document.fonts.ready.then(()=>{setTimeout(()=>{window.print();window.close();},300);});
+    }else{setTimeout(()=>{window.print();window.close();},800);}
+  <\/script></body>`));
+  pw.document.close();
+}
+
+function edDocLabel(type) {
+  const map = {
+    roomdiary:'Room Diary (21 sheets)', seating:'Seating Plan',
+    board1h:'Notice Board — 1st Half', board2h:'Notice Board — 2nd Half',
+    routine:'Exam Routine', dutycards:'Teacher Duty Cards',
+    roster:'Duty Roster', answerscript:'Answer Script Distribution',
+    attendance:'Attendance Sheets', all:'All Documents'
+  };
+  return map[type]||type;
+}
+
+// ── Main entry points ────────────────────────────────────────────────────────
+function edPrint(type) {
+  if(!ED.loaded){ showAlert('Please upload Excel file or load from MongoDB first.','error'); return; }
+  edShowPrintSettings(type);
+}
+
+function edPrintAll() {
+  if(!ED.loaded){ showAlert('Please upload Excel file or load from MongoDB first.','error'); return; }
+  edShowPrintSettings('all');
+}
+
+
 </script>
+<div id="ed-print-output" style="display:none"></div>
 </body>
 </html>
