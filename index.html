@@ -942,133 +942,262 @@ async function confirmDeleteExam(id, modal) {
 
 // ── TIMETABLE ────────────────────────────────────────────────────────────────
 async function renderTimetable(el) {
-    const [exams, classes] = await Promise.all([DB.get('exams'), DB.get('classes')]);
-    const classOpts = classes.map(c=>`<option value="${c.name||c.className}">${c.name||c.className}</option>`).join('');
-    const examOpts  = exams.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+    const [exams, tts] = await Promise.all([DB.get('exams'), DB.get('examTimetables')]);
+    const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
 
     el.innerHTML = `
     <div class="page-title">📅 Exam Timetable</div>
-    <div class="card">
-      <div class="card-title">➕ Add Timetable Entry</div>
-      <div class="form-row">
-        <div class="form-group"><label>Exam *</label>
-          <select id="ttExam" onchange="loadTTEntries()"><option value="">--Select--</option>${examOpts}</select>
+    <div style="padding:0 24px 24px">
+      <div class="tab-bar">
+        <button class="tab-pill active" onclick="ttTab('view',this)">📋 View / Edit</button>
+        <button class="tab-pill" onclick="ttTab('add',this)">➕ Add Entry</button>
+        <button class="tab-pill" onclick="ttTab('import',this)">📥 Excel Import</button>
+        <button class="tab-pill" onclick="ttTab('print',this)">🖨️ Print</button>
+      </div>
+
+      <!-- VIEW TAB -->
+      <div id="tt-view" class="tab-panel active">
+        <div class="card">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+            <select id="ttFilter" onchange="loadTTEntries()" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit">
+              <option value="">— All Exams —</option>${examOpts}
+            </select>
+            <input id="tt-search" type="text" placeholder="🔍 Subject / Class..." oninput="ttSearch()"
+              style="padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;min-width:180px">
+            <button class="btn btn-warning btn-sm" onclick="ttExport()">📊 Export</button>
+            <button class="btn btn-danger btn-sm" onclick="ttDeleteAll()">🗑️ Clear Exam</button>
+          </div>
+          <div id="tt-stats" style="font-size:12px;color:var(--text-2);margin-bottom:10px"></div>
+          <div class="table-wrap">
+            <table id="tt-table">
+              <thead><tr>
+                <th>Date</th><th>Session</th><th>Time</th>
+                <th>Class</th><th>Subject</th><th>Marks</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="ttTbody">
+                <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-2)">Select an exam above</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div class="form-group"><label>Date *</label><input type="date" id="ttDate"></div>
-        <div class="form-group"><label>Session</label>
-          <select id="ttSession">
-            <option value="1st Half">1st Half</option>
-            <option value="2nd Half">2nd Half</option>
-            <option value="Morning">Morning</option>
-            <option value="Afternoon">Afternoon</option>
-            <option value="Evening">Evening</option>
-          </select>
+      </div>
+
+      <!-- ADD TAB -->
+      <div id="tt-add" class="tab-panel">
+        <div class="card">
+          <div class="card-title">➕ Add New Entry</div>
+          <div class="form-row">
+            <div class="form-group"><label>Exam *</label>
+              <select id="ttExam"><option value="">--Select--</option>${examOpts}</select></div>
+            <div class="form-group"><label>Date * <small>(dd-mm-yyyy)</small></label>
+              <input id="ttDate" placeholder="01-04-2026"></div>
+            <div class="form-group"><label>Day</label>
+              <input id="ttDay" placeholder="Wednesday"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Session</label>
+              <select id="ttSession">
+                <option value="1st Half">1st Half</option>
+                <option value="2nd Half">2nd Half</option>
+              </select></div>
+            <div class="form-group"><label>Time</label>
+              <input id="ttTime" placeholder="11:00–12:15"></div>
+            <div class="form-group"><label>Class *</label>
+              <input id="ttClass" placeholder="V or VI,VII,VIII"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Subject *</label>
+              <input id="ttSubject" placeholder="Bengali"></div>
+            <div class="form-group"><label>Max Marks</label>
+              <input type="number" id="ttMarks" value="30"></div>
+            <div class="form-group"><label>Duration</label>
+              <input id="ttDuration" placeholder="1 hr 15 min"></div>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="addTTEntry()">➕ Add Entry</button>
+            <button class="btn btn-secondary" onclick="ttClearForm()">🔄 Clear</button>
+          </div>
+        </div>
+        <div class="card" style="border-left:4px solid #10b981">
+          <div class="card-title" style="color:#065f46">⚡ Quick Add — 1st Summative 2026 (PDF data)</div>
+          <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">Class V–X সব entries একসাথে add করুন</p>
+          <button class="btn btn-primary" onclick="edSeedTimetable()" style="background:#059669">📅 Add All Entries to EMS</button>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>Start Time *</label><input type="time" id="ttTime" value="10:00"></div>
-        <div class="form-group"><label>Duration (min)</label><input type="number" id="ttDur" value="180" min="30"></div>
-        <div class="form-group"><label>Class *</label>
-          <select id="ttClass"><option value="">--Select--</option>${classOpts}</select>
+
+      <!-- IMPORT TAB -->
+      <div id="tt-import" class="tab-panel">
+        <div class="card">
+          <div class="card-title">📥 Excel থেকে Import</div>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin-bottom:14px">
+            <div style="font-size:12px;font-weight:600;color:#1e40af;margin-bottom:6px">📋 Excel columns:</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${['Date','Day','Session','Time','Class','Subject','Max Marks'].map(c=>
+                `<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:4px;font-size:11px;font-family:monospace">${c}</span>`
+              ).join('')}
+            </div>
+          </div>
+          <div class="form-group" style="max-width:300px;margin-bottom:12px">
+            <label>Exam *</label>
+            <select id="tt-import-exam"><option value="">--Select--</option>${examOpts}</select>
+          </div>
+          <div id="tt-import-zone"
+            style="border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;margin-bottom:12px;transition:all .2s"
+            ondragover="event.preventDefault();this.style.borderColor='#2563eb'"
+            ondragleave="this.style.borderColor=''"
+            ondrop="ttImportDrop(event)"
+            onclick="document.getElementById('tt-import-file').click()">
+            <input type="file" id="tt-import-file" accept=".xlsx,.xls" style="display:none" onchange="ttImportExcel(event)">
+            <div style="font-size:28px;margin-bottom:6px">📊</div>
+            <div style="font-size:13px;font-weight:600">Drop Excel or click to upload</div>
+          </div>
+          <div id="tt-import-status" style="font-size:12px;color:var(--text-2);margin-bottom:10px"></div>
+          <button class="btn btn-warning" onclick="ttDownloadTemplate()">📥 Download Template</button>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>Subject *</label><input id="ttSubject" placeholder="e.g., Mathematics"></div>
-        <div class="form-group"><label>Max Marks</label><input type="number" id="ttMarks" value="100"></div>
-        <div class="form-group"><label>Room/Hall</label><input id="ttRoom" placeholder="Optional"></div>
+
+      <!-- PRINT TAB -->
+      <div id="tt-print" class="tab-panel">
+        <div class="card">
+          <div class="card-title">🖨️ Print Examination Programme</div>
+          <div class="form-group" style="max-width:300px;margin-bottom:16px">
+            <label>Exam Select করুন</label>
+            <select id="tt-print-exam"><option value="">--Select--</option>${examOpts}</select>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
+            <div class="tool-card" onclick="ttPrint('classwise')" style="cursor:pointer">
+              <div style="font-size:24px;margin-bottom:6px">📄</div>
+              <div class="tool-name">Class-wise Pages</div>
+              <div class="tool-desc">V, VI-VIII, IX-X আলাদা (PDF মতো)</div>
+            </div>
+            <div class="tool-card" onclick="ttPrint('combined')" style="cursor:pointer">
+              <div style="font-size:24px;margin-bottom:6px">📋</div>
+              <div class="tool-name">Combined Table</div>
+              <div class="tool-desc">সব class একসাথে</div>
+            </div>
+            <div class="tool-card" onclick="ttPrint('teacher')" style="cursor:pointer">
+              <div style="font-size:24px;margin-bottom:6px">👩‍🏫</div>
+              <div class="tool-name">Teacher Copy</div>
+              <div class="tool-desc">Teacher assignment সহ</div>
+            </div>
+            <div class="tool-card" onclick="ttExport()" style="cursor:pointer">
+              <div style="font-size:24px;margin-bottom:6px">📊</div>
+              <div class="tool-name">Export Excel</div>
+              <div class="tool-desc">Excel-এ download</div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="btn-group">
-        <button class="btn btn-primary" onclick="addTTEntry()">➕ Add Entry</button>
-        <button class="btn btn-success" onclick="autoGenTT()">⚡ Auto-Generate</button>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">📋 Timetable Entries</div>
-      <div class="form-group" style="max-width:300px;margin-bottom:16px;">
-        <label>Filter by Exam</label>
-        <select id="ttFilter" onchange="loadTTEntries()"><option value="">All Exams</option>${examOpts}</select>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Exam</th><th>Date</th><th>Session</th><th>Time</th><th>Class</th><th>Subject</th><th>Marks</th><th>Actions</th></tr></thead>
-        <tbody id="ttTbody"><tr><td colspan="8" style="text-align:center;padding:30px;color:#aaa;">Select an exam to view entries</td></tr></tbody>
-      </table></div>
     </div>`;
 
-    if (window._selectedExam) {
-        document.getElementById('ttExam').value = window._selectedExam;
-        document.getElementById('ttFilter').value = window._selectedExam;
+    if(window._selectedExam){
+        const f=document.getElementById('ttFilter');
+        if(f) f.value=window._selectedExam;
+        const p=document.getElementById('tt-print-exam');
+        if(p) p.value=window._selectedExam;
         loadTTEntries();
-        window._selectedExam = null;
+        window._selectedExam=null;
     }
 }
 
-async function loadTTEntries() {
-    const filter = document.getElementById('ttFilter')?.value || document.getElementById('ttExam')?.value || '';
-    const [tts, exams] = await Promise.all([DB.get('examTimetables'), DB.get('exams')]);
-    const rows = filter ? tts.filter(t=>String(t.examId)===String(filter)) : tts;
-    rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||(a.session||'').localeCompare(b.session||'')||(a.className||'').localeCompare(b.className||''));
+window.ttTab = function(tab,btn){
+    document.querySelectorAll('#tt-view,#tt-add,#tt-import,#tt-print').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.tab-pill').forEach(b=>b.classList.remove('active'));
+    document.getElementById('tt-'+tab).classList.add('active');
+    if(btn) btn.classList.add('active');
+    if(tab==='view') loadTTEntries();
+};
 
-    const tbody = document.getElementById('ttTbody');
-    if (!tbody) return;
-    tbody.innerHTML = rows.length ? rows.map(t=>{
-        const exam = exams.find(e=>String(e.id)===String(t.examId));
-        // Support both time formats: "11:00–12:15" and startTime field
-        const timeStr = t.time || (t.startTime ? fmtTime(t.startTime) + (t.duration?` (${t.duration}m)`:'') : '—');
-        // Display date — handle dd-mm-yyyy and yyyy-mm-dd
-        let dateDisplay = t.date||'—';
-        if(dateDisplay.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            const [y,m,d] = dateDisplay.split('-');
-            dateDisplay = `${d}-${m}-${y}`;
-        }
-        return `<tr>
-          <td><small>${exam?.name||t.examId}</small></td>
-          <td><strong>${dateDisplay}</strong><br><small style="color:#888">${t.day||''}</small></td>
-          <td><span class="badge badge-blue">${t.session||'—'}</span></td>
-          <td style="font-size:12px">${timeStr}</td>
-          <td><span class="badge badge-green">${t.className||'—'}</span></td>
+async function loadTTEntries(){
+    const filter=document.getElementById('ttFilter')?.value||'';
+    const [tts,exams]=await Promise.all([DB.get('examTimetables'),DB.get('exams')]);
+    const rows=filter?tts.filter(t=>String(t.examId)===String(filter)):tts;
+    rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||(a.session||'').localeCompare(b.session||'')||(a.className||'').localeCompare(b.className||''));
+    const statsEl=document.getElementById('tt-stats');
+    if(statsEl&&filter){
+        const dates=[...new Set(rows.map(r=>r.date))];
+        const cls=[...new Set(rows.map(r=>r.className))];
+        statsEl.innerHTML=`<span style="color:var(--primary);font-weight:600">${rows.length}</span> entries · <span style="color:var(--primary);font-weight:600">${dates.length}</span> dates · Classes: <b>${cls.join(', ')}</b>`;
+    }
+    const tbody=document.getElementById('ttTbody');
+    if(!tbody) return;
+    if(!rows.length){tbody.innerHTML=emptyRow(7,'No entries found.');return;}
+    let prevDate='';
+    tbody.innerHTML=rows.map(t=>{
+        const timeStr=t.time||t.startTime||'—';
+        let dd=t.date||'—';
+        if(dd.match(/^\d{4}-\d{2}-\d{2}$/)){const[y,m,d]=dd.split('-');dd=`${d}-${m}-${y}`;}
+        const isNew=t.date!==prevDate; prevDate=t.date;
+        return `<tr style="${t.session?.includes('2nd')?'background:#FFFBEB':''}">
+          <td>${isNew?`<strong style="color:#1B3A6B">${dd}</strong><br><small style="color:#94a3b8">${t.day||''}</small>`:`<small style="color:#94a3b8">${dd}</small>`}</td>
+          <td><span class="badge ${t.session?.includes('2nd')?'badge-orange':'badge-blue'}" style="font-size:10px">${t.session||'—'}</span></td>
+          <td style="font-size:12px;color:#475569">${timeStr}</td>
+          <td><span class="badge badge-green" style="font-size:11px">${t.className||'—'}</span></td>
           <td><strong>${t.subject||'—'}</strong></td>
-          <td>${t.maxMarks||'—'}</td>
-          <td>
-            <div class="btn-group">
-              <button class="btn btn-info btn-sm" onclick="editTT('${t.id}')">✏️</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteTT('${t.id}')">🗑️</button>
-            </div>
-          </td>
+          <td style="text-align:center">${t.maxMarks||'—'}</td>
+          <td><div class="btn-group">
+            <button class="btn btn-info btn-sm" onclick="editTT('${t.id}')">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteTT('${t.id}')">🗑️</button>
+          </div></td>
         </tr>`;
-    }).join('') : emptyRow(8,'No entries found.');
+    }).join('');
 }
 
-async function editTT(id) {
-    const tts = await DB.get('examTimetables');
-    const t = tts.find(x=>x.id===id);
-    if(!t) return;
-    const exams = await DB.get('exams');
-    const examOpts = exams.map(e=>`<option value="${e.id}" ${e.id===t.examId?'selected':''}>${e.name}</option>`).join('');
+function ttSearch(){
+    const q=document.getElementById('tt-search')?.value.toLowerCase()||'';
+    document.querySelectorAll('#tt-table tbody tr').forEach(r=>{r.style.display=(!q||r.textContent.toLowerCase().includes(q))?'':'none';});
+}
 
-    const m = document.createElement('div');
-    m.className='modal-overlay';
-    m.innerHTML=`<div class="modal-box" style="max-width:500px">
-      <div class="modal-header"><h3>✏️ Edit Timetable Entry</h3>
+async function addTTEntry(){
+    const examId=document.getElementById('ttExam').value;
+    const date=document.getElementById('ttDate').value.trim();
+    const cls=document.getElementById('ttClass').value.trim();
+    const subj=document.getElementById('ttSubject').value.trim();
+    if(!examId||!date||!cls||!subj){showAlert('Exam, Date, Class & Subject required.','error');return;}
+    const exams=await DB.get('exams');
+    const exam=exams.find(e=>String(e.id)===String(examId));
+    const tts=await DB.get('examTimetables');
+    tts.push({
+        id:Date.now().toString()+'_'+Math.random().toString(36).slice(2,5),
+        examId,examName:exam?.name||'',
+        date,day:document.getElementById('ttDay').value.trim(),
+        session:document.getElementById('ttSession').value,
+        time:document.getElementById('ttTime').value.trim(),
+        startTime:document.getElementById('ttTime').value.trim(),
+        className:cls,subject:subj,
+        maxMarks:parseInt(document.getElementById('ttMarks').value)||null,
+        duration:document.getElementById('ttDuration').value.trim(),
+    });
+    await DB.set('examTimetables',tts);
+    showAlert('✅ Entry added!','success');
+    ttClearForm();
+}
+
+function ttClearForm(){
+    ['ttDate','ttDay','ttTime','ttClass','ttSubject','ttDuration'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    const m=document.getElementById('ttMarks');if(m)m.value='30';
+}
+
+async function editTT(id){
+    const tts=await DB.get('examTimetables');
+    const t=tts.find(x=>x.id===id);if(!t)return;
+    const exams=await DB.get('exams');
+    const examOpts=exams.map(e=>`<option value="${e.id}" ${String(e.id)===String(t.examId)?'selected':''}>${e.name}</option>`).join('');
+    const m=document.createElement('div');m.className='modal-overlay';
+    m.innerHTML=`<div class="modal-box" style="max-width:520px">
+      <div class="modal-header"><h3>✏️ Edit Entry</h3>
         <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
       <div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div class="form-group" style="grid-column:1/-1"><label>Exam</label>
-          <select id="et-exam">${examOpts}</select></div>
-        <div class="form-group"><label>Date (dd-mm-yyyy)</label>
-          <input id="et-date" value="${t.date||''}" placeholder="01-04-2026"></div>
-        <div class="form-group"><label>Day</label>
-          <input id="et-day" value="${t.day||''}" placeholder="Wednesday"></div>
+        <div class="form-group" style="grid-column:1/-1"><label>Exam</label><select id="et-exam">${examOpts}</select></div>
+        <div class="form-group"><label>Date (dd-mm-yyyy)</label><input id="et-date" value="${t.date||''}" placeholder="01-04-2026"></div>
+        <div class="form-group"><label>Day</label><input id="et-day" value="${t.day||''}" placeholder="Wednesday"></div>
         <div class="form-group"><label>Session</label>
-          <select id="et-sess">
-            ${['1st Half','2nd Half','Morning','Afternoon'].map(s=>`<option ${s===t.session?'selected':''}>${s}</option>`).join('')}
-          </select></div>
-        <div class="form-group"><label>Time</label>
-          <input id="et-time" value="${t.time||t.startTime||''}" placeholder="11:00–12:15"></div>
-        <div class="form-group"><label>Class</label>
-          <input id="et-cls" value="${t.className||''}" placeholder="V, VI, VII..."></div>
-        <div class="form-group"><label>Subject</label>
-          <input id="et-subj" value="${t.subject||''}" placeholder="Bengali"></div>
-        <div class="form-group"><label>Max Marks</label>
-          <input type="number" id="et-marks" value="${t.maxMarks||''}"></div>
+          <select id="et-sess">${['1st Half','2nd Half','Morning','Afternoon'].map(s=>`<option ${s===(t.session||'')?'selected':''}>${s}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Time</label><input id="et-time" value="${t.time||t.startTime||''}" placeholder="11:00–12:15"></div>
+        <div class="form-group"><label>Class</label><input id="et-cls" value="${t.className||''}" placeholder="V"></div>
+        <div class="form-group"><label>Subject</label><input id="et-subj" value="${t.subject||''}" placeholder="Bengali"></div>
+        <div class="form-group"><label>Max Marks</label><input type="number" id="et-marks" value="${t.maxMarks||''}"></div>
+        <div class="form-group" style="grid-column:1/-1"><label>Duration</label><input id="et-dur" value="${t.duration||''}" placeholder="1 hr 15 min"></div>
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--border)">
         <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
@@ -1076,86 +1205,269 @@ async function editTT(id) {
       </div>
     </div>`;
     document.body.appendChild(m);
-    m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+    m.addEventListener('click',e=>{if(e.target===m)m.remove();});
 }
 
-async function saveTTEdit(id) {
-    const tts = await DB.get('examTimetables');
-    const idx = tts.findIndex(t=>t.id===id);
-    if(idx<0) return;
-    tts[idx] = { ...tts[idx],
-        examId:    document.getElementById('et-exam').value,
-        date:      document.getElementById('et-date').value,
-        day:       document.getElementById('et-day').value,
-        session:   document.getElementById('et-sess').value,
-        time:      document.getElementById('et-time').value,
-        startTime: document.getElementById('et-time').value,
-        className: document.getElementById('et-cls').value,
-        subject:   document.getElementById('et-subj').value,
-        maxMarks:  parseInt(document.getElementById('et-marks').value)||null,
+async function saveTTEdit(id){
+    const tts=await DB.get('examTimetables');
+    const idx=tts.findIndex(t=>t.id===id);if(idx<0)return;
+    const examId=document.getElementById('et-exam').value;
+    const exams=await DB.get('exams');
+    const exam=exams.find(e=>String(e.id)===String(examId));
+    tts[idx]={...tts[idx],
+        examId,examName:exam?.name||tts[idx].examName||'',
+        date:document.getElementById('et-date').value.trim(),
+        day:document.getElementById('et-day').value.trim(),
+        session:document.getElementById('et-sess').value,
+        time:document.getElementById('et-time').value.trim(),
+        startTime:document.getElementById('et-time').value.trim(),
+        className:document.getElementById('et-cls').value.trim(),
+        subject:document.getElementById('et-subj').value.trim(),
+        maxMarks:parseInt(document.getElementById('et-marks').value)||null,
+        duration:document.getElementById('et-dur').value.trim(),
     };
-    await DB.set('examTimetables', tts);
+    await DB.set('examTimetables',tts);
     document.querySelector('.modal-overlay')?.remove();
-    showAlert('✅ Entry updated!','success');
+    showAlert('✅ Updated!','success');
     loadTTEntries();
 }
 
-async function addTTEntry() {
-    const examId = document.getElementById('ttExam').value;
-    const date   = document.getElementById('ttDate').value;
-    const cls    = document.getElementById('ttClass').value;
-    const subj   = document.getElementById('ttSubject').value.trim();
-    if(!examId||!date||!cls||!subj){showAlert('Exam, Date, Class & Subject required.','error');return;}
-    const exams = await DB.get('exams');
-    const exam  = exams.find(e=>String(e.id)===String(examId));
-    const tts   = await DB.get('examTimetables');
-    tts.push({
-        id:Date.now().toString(), examId, examName:exam?.name||'',
-        date, session:document.getElementById('ttSession').value,
-        startTime:document.getElementById('ttTime').value,
-        duration:parseInt(document.getElementById('ttDur').value)||180,
-        className:cls, subject:subj,
-        maxMarks:parseInt(document.getElementById('ttMarks').value)||100,
-        room:document.getElementById('ttRoom').value||''
-    });
-    await DB.set('examTimetables',tts);
-    showAlert('✅ Entry added!','success');
-    document.getElementById('ttFilter').value = examId;
-    loadTTEntries();
+async function deleteTT(id){
+    if(!confirm('Delete this entry?'))return;
+    await DB.set('examTimetables',(await DB.get('examTimetables')).filter(t=>String(t.id)!==String(id)));
+    showAlert('Deleted.','warning');loadTTEntries();
 }
 
-async function deleteTT(id) {
-    const tts=(await DB.get('examTimetables')).filter(t=>String(t.id)!==String(id));
-    await DB.set('examTimetables',tts);
-    showAlert('Entry deleted.','warning');
-    loadTTEntries();
+async function ttDeleteAll(){
+    const filter=document.getElementById('ttFilter')?.value||'';
+    if(!filter){showAlert('Select an exam first.','error');return;}
+    const exams=await DB.get('exams');
+    const exam=exams.find(e=>String(e.id)===String(filter));
+    if(!confirm(`Delete ALL entries for "${exam?.name||filter}"?`))return;
+    await DB.set('examTimetables',(await DB.get('examTimetables')).filter(t=>String(t.examId)!==String(filter)));
+    showAlert('✅ Cleared.','success');loadTTEntries();
 }
 
-async function autoGenTT() {
-    const examId=document.getElementById('ttExam').value;
-    if(!examId){showAlert('Select an Exam first.','error');return;}
-    const [exams,classes,subjects]=await Promise.all([DB.get('exams'),DB.get('classes'),DB.get('subjects')]);
+function ttImportDrop(e){e.preventDefault();document.getElementById('tt-import-zone').style.borderColor='';if(e.dataTransfer.files[0])ttProcessImport(e.dataTransfer.files[0]);}
+function ttImportExcel(e){if(e.target.files[0])ttProcessImport(e.target.files[0]);}
+
+async function ttProcessImport(file){
+    const examId=document.getElementById('tt-import-exam').value;
+    if(!examId){showAlert('Select exam first.','error');return;}
+    const statusEl=document.getElementById('tt-import-status');
+    if(statusEl)statusEl.textContent='⏳ Reading...';
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+        try{
+            const wb=XLSX.read(ev.target.result,{type:'array'});
+            const ws=wb.Sheets[wb.SheetNames[0]];
+            const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+            let hdRow=0,colMap={date:0,day:1,session:2,time:3,cls:4,subj:5,marks:6};
+            for(let i=0;i<Math.min(data.length,5);i++){
+                const r=data[i].map(c=>String(c||'').toLowerCase().trim());
+                if(r.some(c=>c.includes('date')||c.includes('subject'))){
+                    hdRow=i;
+                    r.forEach((c,ci)=>{
+                        if(c.includes('date'))colMap.date=ci;
+                        if(c.includes('day'))colMap.day=ci;
+                        if(c.includes('session'))colMap.session=ci;
+                        if(c.includes('time'))colMap.time=ci;
+                        if(c.includes('class'))colMap.cls=ci;
+                        if(c.includes('subject'))colMap.subj=ci;
+                        if(c.includes('mark'))colMap.marks=ci;
+                    });
+                    break;
+                }
+            }
+            const exams=await DB.get('exams');
+            const exam=exams.find(e=>String(e.id)===String(examId));
+            const existTTs=await DB.get('examTimetables');
+            const newEntries=[];
+            data.slice(hdRow+1).forEach(row=>{
+                const date=String(row[colMap.date]||'').trim();
+                const subj=String(row[colMap.subj]||'').trim();
+                const cls=String(row[colMap.cls]||'').trim();
+                if(!date||!subj)return;
+                newEntries.push({
+                    id:Date.now().toString()+'_'+Math.random().toString(36).slice(2,5),
+                    examId,examName:exam?.name||'',
+                    date,day:String(row[colMap.day]||'').trim(),
+                    session:String(row[colMap.session]||'1st Half').trim(),
+                    time:String(row[colMap.time]||'').trim(),
+                    startTime:String(row[colMap.time]||'').trim(),
+                    className:cls,subject:subj,
+                    maxMarks:parseInt(row[colMap.marks])||null,
+                });
+            });
+            if(!newEntries.length){showAlert('No valid rows found.','error');return;}
+            await DB.set('examTimetables',[...existTTs.filter(t=>String(t.examId)!==String(examId)),...newEntries]);
+            if(statusEl)statusEl.innerHTML=`✅ <b>${newEntries.length}</b> entries imported!`;
+            showAlert(`✅ ${newEntries.length} entries imported!`,'success');
+        }catch(err){
+            if(statusEl)statusEl.textContent='❌ Error: '+err.message;
+            showAlert('Error: '+err.message,'error');
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function ttDownloadTemplate(){
+    const ws=XLSX.utils.aoa_to_sheet([
+        ['Date','Day','Session','Time','Class','Subject','Max Marks'],
+        ['01-04-2026','Wednesday','1st Half','11:00–12:15','V','Bengali',20],
+        ['01-04-2026','Wednesday','2nd Half','1:00–2:30','IX','Bengali',40],
+    ]);
+    ws['!cols']=[{wch:14},{wch:12},{wch:12},{wch:14},{wch:8},{wch:20},{wch:10}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Timetable');
+    XLSX.writeFile(wb,'TT_Template.xlsx');
+}
+
+async function ttExport(){
+    const filter=document.getElementById('ttFilter')?.value||document.getElementById('tt-print-exam')?.value||'';
+    const [tts,exams]=await Promise.all([DB.get('examTimetables'),DB.get('exams')]);
+    const rows=filter?tts.filter(t=>String(t.examId)===String(filter)):tts;
+    if(!rows.length){showAlert('No entries to export.','warning');return;}
+    rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||(a.className||'').localeCompare(b.className||''));
+    const exam=exams.find(e=>String(e.id)===String(filter));
+    const data=rows.map((t,i)=>({'SL':i+1,'Date':t.date,'Day':t.day||'','Session':t.session||'','Time':t.time||t.startTime||'','Class':t.className||'','Subject':t.subject||'','Max Marks':t.maxMarks||''}));
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws['!cols']=[{wch:4},{wch:14},{wch:12},{wch:12},{wch:14},{wch:8},{wch:20},{wch:10}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Timetable');
+    XLSX.writeFile(wb,`TT_${exam?.name||'Export'}.xlsx`);
+    showAlert('✅ Exported!','success');
+}
+
+async function ttPrint(mode){
+    const examId=document.getElementById('tt-print-exam')?.value||document.getElementById('ttFilter')?.value||'';
+    if(!examId){showAlert('Select an exam first.','error');return;}
+    const [tts,exams,teachers,settings]=await Promise.all([DB.get('examTimetables'),DB.get('exams'),DB.get('teachers'),DB.getObj('settings')]);
     const exam=exams.find(e=>String(e.id)===String(examId));
     if(!exam){showAlert('Exam not found.','error');return;}
-    if(!classes.length||!subjects.length){showAlert('Add Classes and Subjects first.','error');return;}
-    let tts=await DB.get('examTimetables');
-    let cur=new Date(exam.startDate), end=new Date(exam.endDate);
-    const sess=['1st Half','2nd Half'], times=['10:00','13:00']; let si=0, count=0;
-    for(const cls of classes){
-        for(const sub of subjects){
-            if(cur>end) break;
-            if(cur.getDay()===0) cur.setDate(cur.getDate()+1);
-            tts.push({id:Date.now().toString()+Math.random(),examId,examName:exam.name,
-                date:cur.toISOString().split('T')[0],session:sess[si],startTime:times[si],
-                duration:150,className:cls.name||cls.className,subject:sub.name,maxMarks:100});
-            count++;si++;
-            if(si>=sess.length){si=0;cur.setDate(cur.getDate()+1);}
-        }
+    const rows=tts.filter(t=>String(t.examId)===String(examId));
+    if(!rows.length){showAlert('No entries found.','error');return;}
+    rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||(a.className||'').localeCompare(b.className||''));
+    const school=settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+    const examTitle=`${exam.name}${exam.year?' — '+exam.year:''}`;
+
+    if(mode==='classwise'){
+        const groups=[
+            {label:'Class V',classes:['V'],time:'11:00 a.m. to 11:40 a.m.',marks:'20',dur:'40 mins.'},
+            {label:'Class VI, VII & VIII',classes:['VI','VII','VIII'],time:'11:00 a.m. to 12:15 p.m.',marks:'30',dur:'1 hr. 15 mins.'},
+            {label:'Class IX & X',classes:['IX','X'],time:'1:00 p.m. to 2:30 p.m.',marks:'40',dur:'1 hr. 30 mins.'},
+        ];
+        let html='';
+        groups.forEach(grp=>{
+            const seen=new Set();const entries=[];
+            grp.classes.forEach(cls=>{rows.filter(r=>r.className===cls).forEach(r=>{const k=r.date+'_'+r.subject;if(!seen.has(k)){seen.add(k);entries.push(r);}});});
+            if(!entries.length)return;
+            entries.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+            const trs=entries.map((e,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
+              <td style="padding:10px 14px;border:1px solid #B0C4DE;font-weight:700;color:#1B3A6B;font-size:11pt">${e.date}</td>
+              <td style="padding:10px 14px;border:1px solid #B0C4DE;font-size:10.5pt">${e.day||''}</td>
+              <td style="padding:10px 14px;border:1px solid #B0C4DE;font-weight:700;color:#8B5E0A;font-size:11pt">${e.subject}</td>
+            </tr>`).join('');
+            html+=`<div style="page-break-after:always;font-family:'DM Sans',Arial,sans-serif;padding:28px 32px;min-height:250mm;box-sizing:border-box">
+              <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:14px;margin-bottom:18px">
+                <div style="font-size:16pt;font-weight:700;color:#1B3A6B">${school}</div>
+                <div style="font-size:11pt;color:#475569;margin-top:3px">Examination Programme</div>
+                <div style="font-size:12pt;font-weight:700;color:#2C4F8C;margin-top:3px">${examTitle}</div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+                <div style="background:#DCE9F8;border-radius:8px;padding:10px 14px;border-left:4px solid #1B3A6B">
+                  <div style="font-size:9pt;color:#64748B;margin-bottom:2px">Class</div>
+                  <div style="font-size:12pt;font-weight:700;color:#1B3A6B">${grp.label}</div>
+                </div>
+                <div style="background:#DCE9F8;border-radius:8px;padding:10px 14px;border-left:4px solid #2C4F8C">
+                  <div style="font-size:9pt;color:#64748B;margin-bottom:2px">Time</div>
+                  <div style="font-size:10.5pt;font-weight:700;color:#1B3A6B">From ${grp.time}</div>
+                </div>
+                <div style="background:#FEF3C7;border-radius:8px;padding:10px 14px;border-left:4px solid #C9A84C">
+                  <div style="font-size:9pt;color:#64748B;margin-bottom:2px">Full Marks / Duration</div>
+                  <div style="font-size:10.5pt;font-weight:700;color:#92400e">${grp.marks} / ${grp.dur}</div>
+                </div>
+              </div>
+              <table style="width:100%;border-collapse:collapse;margin-bottom:28px">
+                <thead><tr style="background:#1B3A6B;color:white">
+                  <th style="padding:10px 14px;text-align:left;font-size:10.5pt;width:32%">Date</th>
+                  <th style="padding:10px 14px;text-align:left;font-size:10.5pt;width:22%">Day</th>
+                  <th style="padding:10px 14px;text-align:left;font-size:10.5pt">Subject</th>
+                </tr></thead><tbody>${trs}</tbody>
+              </table>
+              <div style="margin-top:40px;text-align:right">
+                <div style="display:inline-block;text-align:center">
+                  <div style="font-size:10.5pt;color:#1B3A6B">SD/–</div>
+                  <div style="font-size:11pt;font-weight:700;color:#1B3A6B;margin-top:2px">Head of the Institution</div>
+                  <div style="font-size:10pt;color:#475569">Dasarath Bagdi</div>
+                  <div style="font-size:10pt;color:#475569">${school}</div>
+                </div>
+              </div>
+            </div>`;
+        });
+        ttOpenPrint(html,'portrait');
+    } else if(mode==='combined'){
+        const trs=rows.map((r,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
+          <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700;color:#1B3A6B">${r.date}</td>
+          <td style="padding:7px 10px;border:1px solid #B0C4DE">${r.day||''}</td>
+          <td style="padding:7px 10px;border:1px solid #B0C4DE"><span style="background:${r.session?.includes('2nd')?'#FEF3C7':'#DBEAFE'};padding:2px 7px;border-radius:99px;font-size:10px;font-weight:600">${r.session||''}</span></td>
+          <td style="padding:7px 10px;border:1px solid #B0C4DE;color:#475569">${r.time||''}</td>
+          <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:700">${r.className||''}</td>
+          <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700;color:#8B5E0A">${r.subject}</td>
+          <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center">${r.maxMarks||''}</td>
+        </tr>`).join('');
+        ttOpenPrint(`<div style="font-family:'DM Sans',Arial,sans-serif;padding:16px">
+          <div style="text-align:center;margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid #1B3A6B">
+            <div style="font-size:15pt;font-weight:700;color:#1B3A6B">${school}</div>
+            <div style="font-size:11pt;font-weight:600;color:#2C4F8C;margin-top:3px">Examination Programme — ${examTitle}</div>
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#1B3A6B;color:white">
+              <th style="padding:8px 10px;text-align:left">Date</th><th style="padding:8px 10px;text-align:left">Day</th>
+              <th style="padding:8px 10px;text-align:left">Session</th><th style="padding:8px 10px;text-align:left">Time</th>
+              <th style="padding:8px 10px;text-align:left">Class</th><th style="padding:8px 10px;text-align:left">Subject</th>
+              <th style="padding:8px 10px;text-align:left">Marks</th>
+            </tr></thead><tbody>${trs}</tbody>
+          </table></div>`,'landscape');
+    } else if(mode==='teacher'){
+        const trs=rows.map((r,i)=>{
+            const t=teachers.find(t=>(t.assignments||[]).some(a=>a.class?.includes(r.className)&&a.subject===r.subject));
+            return `<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
+              <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700;color:#1B3A6B">${r.date}</td>
+              <td style="padding:7px 10px;border:1px solid #B0C4DE">${r.day||''}</td>
+              <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:700">${r.className||''}</td>
+              <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700;color:#8B5E0A">${r.subject}</td>
+              <td style="padding:7px 10px;border:1px solid #B0C4DE;color:#475569">${r.time||''}</td>
+              <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:600;color:#1B3A6B">${t?.name||'—'}</td>
+              <td style="padding:7px 10px;border:1px solid #B0C4DE"></td>
+            </tr>`;
+        }).join('');
+        ttOpenPrint(`<div style="font-family:'DM Sans',Arial,sans-serif;padding:16px">
+          <div style="text-align:center;margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid #1B3A6B">
+            <div style="font-size:15pt;font-weight:700;color:#1B3A6B">${school}</div>
+            <div style="font-size:11pt;font-weight:600;color:#2C4F8C;margin-top:3px">Teacher-wise Programme — ${examTitle}</div>
+          </div>
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#1B3A6B;color:white">
+              <th style="padding:8px 10px;text-align:left">Date</th><th style="padding:8px 10px;text-align:left">Day</th>
+              <th style="padding:8px 10px;text-align:left">Class</th><th style="padding:8px 10px;text-align:left">Subject</th>
+              <th style="padding:8px 10px;text-align:left">Time</th><th style="padding:8px 10px;text-align:left">Teacher</th>
+              <th style="padding:8px 10px;text-align:left">Signature</th>
+            </tr></thead><tbody>${trs}</tbody>
+          </table></div>`,'landscape');
     }
-    await DB.set('examTimetables',tts);
-    showAlert(`✅ ${count} entries auto-generated!`,'success');
-    document.getElementById('ttFilter').value=examId;
-    loadTTEntries();
+}
+
+function ttOpenPrint(html,orientation){
+    const pw=window.open('','_blank',`width=${orientation==='landscape'?1100:800},height=900`);
+    if(!pw){showAlert('Popup blocked!','error');return;}
+    pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>*{margin:0;padding:0;box-sizing:border-box}@page{size:A4 ${orientation};margin:12mm}@media print{body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}body{font-family:'DM Sans',Arial,sans-serif;background:white}</style>
+    </head><body>${html}<script>if(document.fonts&&document.fonts.ready){document.fonts.ready.then(()=>{setTimeout(()=>{window.print();window.close();},300);})}else{setTimeout(()=>{window.print();window.close();},800);}<\/script></body></html>`);
+    pw.document.close();
+}
+
+async function autoGenTT(){
+    showAlert('Use the "Add All Entries to EMS" button in the Add Entry tab.','info');
 }
 
 // ── HALLS ─────────────────────────────────────────────────────────────────────
