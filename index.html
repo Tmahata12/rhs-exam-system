@@ -5705,32 +5705,11 @@ function edBuildRollRange(rolls) {
   return ranges.join(', ');
 }
 
-// ── File handling ────────────────────────────────────────────────────────────
-function edHandleDrop(e) {
-  e.preventDefault();
-  document.getElementById('ed-upload-zone').style.borderColor = '';
-  const f = e.dataTransfer.files[0];
-  if(f) edProcessFile(f);
-}
-function edLoadFile(e) { if(e.target.files[0]) edProcessFile(e.target.files[0]); }
-
-function edProcessFile(file) {
-  const reader = new FileReader();
-  reader.onload = ev => {
-    try {
-      const wb = XLSX.read(ev.target.result, {type:'array', cellDates:false});
-      edParseWorkbook(wb);
-      document.getElementById('ed-file-status').style.display = 'block';
-      document.getElementById('ed-file-status').textContent = `✅ "${file.name}" loaded — ${wb.SheetNames.length} sheets found`;
-      document.getElementById('ed-sync-card').style.display = 'block';
-      document.getElementById('ed-save-btn').disabled = false;
-      document.getElementById('ed-db-status').textContent = 'Ready to save';
-      showAlert('Excel file parsed successfully!', 'success');
-    } catch(err) {
-      showAlert('Error reading file: ' + err.message, 'error');
-    }
-  };
-  reader.readAsArrayBuffer(file);
+// ── Print-only (no import) ────────────────────────────────────────────────────
+function edLoadFile_printOnly() {
+  if(!_edWb){ showAlert('Upload Excel first.','error'); return; }
+  if(!ED.loaded){ showAlert('File not parsed yet.','error'); return; }
+  showAlert('✅ Data ready for printing!','success');
 }
 
 // ── Parse workbook ───────────────────────────────────────────────────────────
@@ -5789,24 +5768,6 @@ function edParseDutyCards(rows) {
   });
   if(cur) cards.push(cur);
   return cards;
-}
-
-function edBuildRoomDiary() {
-  const rooms={};
-  ED.seating.forEach(s => {
-    const key=`${s.room}_${s.half==='1st Half'?'1H':'2H'}`;
-    if(!rooms[key]) rooms[key]={room:s.room,half:s.half,gender:s.gender,classes:[],totalStudents:0,capacity:0};
-    rooms[key].classes.push({cls:s.cls,sec:s.sec,assigned:s.assigned||0,rolls:s.rolls});
-    rooms[key].totalStudents+=(s.assigned||0);
-    rooms[key].capacity=Math.max(rooms[key].capacity,s.capacity||0);
-  });
-  Object.values(rooms).forEach(r => {
-    r.schedule = (r.half==='1st Half')?ED.routine.h1:ED.routine.h2;
-  });
-  return Object.values(rooms).sort((a,b)=>{
-    const ra=parseInt(a.room.replace('R-','')), rb=parseInt(b.room.replace('R-',''));
-    return ra!==rb?ra-rb:(a.half==='1st Half'?0:1)-(b.half==='1st Half'?0:1);
-  });
 }
 
 // ── MongoDB save/load ────────────────────────────────────────────────────────
