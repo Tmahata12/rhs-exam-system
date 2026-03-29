@@ -1006,23 +1006,98 @@ async function loadTTEntries() {
     const filter = document.getElementById('ttFilter')?.value || document.getElementById('ttExam')?.value || '';
     const [tts, exams] = await Promise.all([DB.get('examTimetables'), DB.get('exams')]);
     const rows = filter ? tts.filter(t=>String(t.examId)===String(filter)) : tts;
-    rows.sort((a,b)=>a.date.localeCompare(b.date)||(a.session||'').localeCompare(b.session||''));
+    rows.sort((a,b)=>String(a.date).localeCompare(String(b.date))||(a.session||'').localeCompare(b.session||'')||(a.className||'').localeCompare(b.className||''));
 
     const tbody = document.getElementById('ttTbody');
     if (!tbody) return;
     tbody.innerHTML = rows.length ? rows.map(t=>{
         const exam = exams.find(e=>String(e.id)===String(t.examId));
+        // Support both time formats: "11:00–12:15" and startTime field
+        const timeStr = t.time || (t.startTime ? fmtTime(t.startTime) + (t.duration?` (${t.duration}m)`:'') : '—');
+        // Display date — handle dd-mm-yyyy and yyyy-mm-dd
+        let dateDisplay = t.date||'—';
+        if(dateDisplay.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            const [y,m,d] = dateDisplay.split('-');
+            dateDisplay = `${d}-${m}-${y}`;
+        }
         return `<tr>
           <td><small>${exam?.name||t.examId}</small></td>
-          <td>${fmt(t.date)}</td>
+          <td><strong>${dateDisplay}</strong><br><small style="color:#888">${t.day||''}</small></td>
           <td><span class="badge badge-blue">${t.session||'—'}</span></td>
-          <td>${fmtTime(t.startTime)}<br><small style="color:#888">${t.duration||'—'} min</small></td>
-          <td>${t.className||'—'}</td>
+          <td style="font-size:12px">${timeStr}</td>
+          <td><span class="badge badge-green">${t.className||'—'}</span></td>
           <td><strong>${t.subject||'—'}</strong></td>
-          <td>${t.maxMarks||100}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="deleteTT('${t.id}')">🗑️</button></td>
+          <td>${t.maxMarks||'—'}</td>
+          <td>
+            <div class="btn-group">
+              <button class="btn btn-info btn-sm" onclick="editTT('${t.id}')">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteTT('${t.id}')">🗑️</button>
+            </div>
+          </td>
         </tr>`;
     }).join('') : emptyRow(8,'No entries found.');
+}
+
+async function editTT(id) {
+    const tts = await DB.get('examTimetables');
+    const t = tts.find(x=>x.id===id);
+    if(!t) return;
+    const exams = await DB.get('exams');
+    const examOpts = exams.map(e=>`<option value="${e.id}" ${e.id===t.examId?'selected':''}>${e.name}</option>`).join('');
+
+    const m = document.createElement('div');
+    m.className='modal-overlay';
+    m.innerHTML=`<div class="modal-box" style="max-width:500px">
+      <div class="modal-header"><h3>✏️ Edit Timetable Entry</h3>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+      <div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group" style="grid-column:1/-1"><label>Exam</label>
+          <select id="et-exam">${examOpts}</select></div>
+        <div class="form-group"><label>Date (dd-mm-yyyy)</label>
+          <input id="et-date" value="${t.date||''}" placeholder="01-04-2026"></div>
+        <div class="form-group"><label>Day</label>
+          <input id="et-day" value="${t.day||''}" placeholder="Wednesday"></div>
+        <div class="form-group"><label>Session</label>
+          <select id="et-sess">
+            ${['1st Half','2nd Half','Morning','Afternoon'].map(s=>`<option ${s===t.session?'selected':''}>${s}</option>`).join('')}
+          </select></div>
+        <div class="form-group"><label>Time</label>
+          <input id="et-time" value="${t.time||t.startTime||''}" placeholder="11:00–12:15"></div>
+        <div class="form-group"><label>Class</label>
+          <input id="et-cls" value="${t.className||''}" placeholder="V, VI, VII..."></div>
+        <div class="form-group"><label>Subject</label>
+          <input id="et-subj" value="${t.subject||''}" placeholder="Bengali"></div>
+        <div class="form-group"><label>Max Marks</label>
+          <input type="number" id="et-marks" value="${t.maxMarks||''}"></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--border)">
+        <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTTEdit('${id}')">💾 Save</button>
+      </div>
+    </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+}
+
+async function saveTTEdit(id) {
+    const tts = await DB.get('examTimetables');
+    const idx = tts.findIndex(t=>t.id===id);
+    if(idx<0) return;
+    tts[idx] = { ...tts[idx],
+        examId:    document.getElementById('et-exam').value,
+        date:      document.getElementById('et-date').value,
+        day:       document.getElementById('et-day').value,
+        session:   document.getElementById('et-sess').value,
+        time:      document.getElementById('et-time').value,
+        startTime: document.getElementById('et-time').value,
+        className: document.getElementById('et-cls').value,
+        subject:   document.getElementById('et-subj').value,
+        maxMarks:  parseInt(document.getElementById('et-marks').value)||null,
+    };
+    await DB.set('examTimetables', tts);
+    document.querySelector('.modal-overlay')?.remove();
+    showAlert('✅ Entry updated!','success');
+    loadTTEntries();
 }
 
 async function addTTEntry() {
@@ -6574,28 +6649,149 @@ function edGenRoomDiary() {
 }
 
 function edGenRoutine() {
-  const mkR=(r,i)=>`<tr class="${i%2===0?'ed-td-even':'ed-td-odd'}">
-    <td style="padding:7px 10px;font-weight:700;color:#1B3A6B;font-size:9.5pt;border:1px solid #B0C4DE">${r.date}</td>
-    <td style="padding:7px 10px;font-size:9pt;border:1px solid #B0C4DE">${r.day}</td>
-    <td style="padding:7px 10px;font-weight:700;color:#8B5E0A;font-size:10pt;border:1px solid #B0C4DE">${r.subject}</td>
-    <td style="padding:7px 10px;font-size:9pt;border:1px solid #B0C4DE">${r.classes}</td>
-    <td style="padding:7px 10px;font-size:9pt;font-weight:600;border:1px solid #B0C4DE">${r.time}</td>
-  </tr>`;
-  const TH=`class="ed-th"`;
-  return `<div class="ed-page-land">${edHdr('Examination Programme','')}
-  <div style="padding:14px 16px">
-    <div style="font-size:10pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;padding:8px 12px;border-left:5px solid #1B3A6B;margin-bottom:10px">1st Half — Class V to VIII</div>
-    <table style=";border-collapse:collapse"><thead><tr>
-      <th ${TH} style="">Date</th><th ${TH} style="">Day</th>
-      <th ${TH} style="">Subject</th><th ${TH} style="">For Classes</th><th ${TH} style="">Time</th>
-    </tr></thead><tbody>${ED.routine.h1.map(mkR).join('')}</tbody></table>
-    <div style="font-size:10pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;padding:8px 12px;border-left:5px solid #1B3A6B;margin:16px 0 10px">2nd Half — Class IX &amp; X</div>
-    <table style=";border-collapse:collapse"><thead><tr>
-      <th ${TH} style="">Date</th><th ${TH} style="">Day</th>
-      <th ${TH} style="">Subject</th><th ${TH} style="">For Classes</th><th ${TH} style="">Time</th>
-    </tr></thead><tbody>${ED.routine.h2.map(mkR).join('')}</tbody></table>
-    <div style="margin-top:24px;font-size:9pt;color:#64748B;border-top:1px solid #E2E8F0;padding-top:10px;font-style:italic">SD/– Head of the Institution</div>
-  </div>${edFoot('Ramnagar High School (H.S.) · 1st Summative Evaluation 2026 · Examination Programme')}</div>`;
+  // Group by class from timetable data
+  const school = ED.school || 'RAMNAGAR HIGH SCHOOL (H.S.)';
+  const examTitle = ED.examTitle || '1st Summative Evaluation — 2026';
+
+  // Build class groups from routine
+  // Class V — 1st Half only
+  // Class VI,VII,VIII — 1st Half
+  // Class IX,X — 2nd Half
+
+  // If routine has per-class data (from seed), use that
+  // Otherwise fall back to grouped display
+  const allEntries = [...(ED.routine.h1||[]), ...(ED.routine.h2||[])];
+
+  // Get unique classes
+  const classSet = new Set();
+  allEntries.forEach(e => {
+    if(e.classes) String(e.classes).split(',').forEach(c=>classSet.add(c.trim()));
+    if(e.className) classSet.add(e.className.trim());
+  });
+
+  // Try per-class pages first (if className exists in entries)
+  const hasCls = allEntries.some(e=>e.className);
+
+  if(hasCls) {
+    // Group entries by class
+    const byClass = {};
+    allEntries.forEach(e => {
+      const cls = e.className||'';
+      if(!byClass[cls]) byClass[cls]=[];
+      // Avoid duplicates (same date+subject)
+      if(!byClass[cls].find(x=>x.date===e.date&&x.subject===e.subject))
+        byClass[cls].push(e);
+    });
+
+    // Sort class order: V, VI, VII, VIII, IX, X
+    const clsOrder = ['V','VI','VII','VIII','IX','X'];
+    const sorted = Object.entries(byClass).sort(([a],[b])=>{
+      return (clsOrder.indexOf(a)||99) - (clsOrder.indexOf(b)||99);
+    });
+
+    // Define class groups for combined pages
+    const groups = [
+      { label:'Class V',         time:'11:00 a.m. to 11:40 a.m.', marks:'20', duration:'40 mins.', classes:['V']     },
+      { label:'Class VI, VII & VIII', time:'11:00 a.m. to 12:15 p.m.', marks:'30', duration:'1 hr. 15 mins.', classes:['VI','VII','VIII'] },
+      { label:'Class IX & X',    time:'1:00 p.m. to 2:30 p.m.',  marks:'40', duration:'1 hr. 30 mins.', classes:['IX','X'] },
+    ];
+
+    return groups.map(grp => {
+      // Collect entries for these classes, deduplicate by date+subject
+      const seen = new Set();
+      const entries = [];
+      grp.classes.forEach(cls => {
+        (byClass[cls]||[]).forEach(e => {
+          const key = e.date+'_'+e.subject;
+          if(!seen.has(key)) { seen.add(key); entries.push(e); }
+        });
+      });
+      entries.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+
+      const TH = `class="ed-th"`;
+      const rows = entries.map((e,i)=>`<tr class="${i%2===0?'ed-td-even':'ed-td-odd'}">
+        <td style="padding:9px 12px;font-weight:700;color:#1B3A6B;font-size:10pt;border:1px solid #B0C4DE">${e.date}</td>
+        <td style="padding:9px 12px;font-size:9.5pt;border:1px solid #B0C4DE">${e.day}</td>
+        <td style="padding:9px 12px;font-weight:700;color:#8B5E0A;font-size:10.5pt;border:1px solid #B0C4DE">${e.subject}</td>
+      </tr>`).join('');
+
+      return `<div class="ed-page-port">
+        <div class="ed-hdr">
+          <div class="sn">${school}</div>
+          <div class="ss">${examTitle}</div>
+        </div>
+        <div class="ed-gold"></div>
+        <div style="padding:22px 28px;flex:1">
+          <!-- School info block like original PDF -->
+          <div style="text-align:center;margin-bottom:18px;padding-bottom:14px;border-bottom:2px solid #1B3A6B">
+            <div style="font-size:13pt;font-weight:700;color:#1B3A6B;font-family:'Crimson Pro','Georgia',serif">Examination Programme</div>
+            <div style="font-size:11pt;font-weight:600;color:#2C4F8C;margin-top:6px">${examTitle}</div>
+          </div>
+          <!-- Class & Time info -->
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+            <div style="background:#DCE9F8;border-radius:8px;padding:10px 14px;border-left:4px solid #1B3A6B">
+              <div style="font-size:9pt;color:#64748B;margin-bottom:3px">Class</div>
+              <div style="font-size:11pt;font-weight:700;color:#1B3A6B">${grp.label}</div>
+            </div>
+            <div style="background:#DCE9F8;border-radius:8px;padding:10px 14px;border-left:4px solid #2C4F8C">
+              <div style="font-size:9pt;color:#64748B;margin-bottom:3px">Time</div>
+              <div style="font-size:10pt;font-weight:700;color:#1B3A6B">From ${grp.time}</div>
+            </div>
+            <div style="background:#DCE9F8;border-radius:8px;padding:10px 14px;border-left:4px solid #C9A84C">
+              <div style="font-size:9pt;color:#64748B;margin-bottom:3px">Full Marks / Duration</div>
+              <div style="font-size:10pt;font-weight:700;color:#1B3A6B">${grp.marks} / ${grp.duration}</div>
+            </div>
+          </div>
+          <!-- Schedule table -->
+          <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+            <thead>
+              <tr>
+                <th ${TH} style="width:32%;font-size:10pt">Date</th>
+                <th ${TH} style="width:22%;font-size:10pt">Day</th>
+                <th ${TH} style="font-size:10pt">Subject</th>
+              </tr>
+            </thead>
+            <tbody>${rows||'<tr><td colspan="3" style="padding:20px;text-align:center;color:#64748B">No entries</td></tr>'}</tbody>
+          </table>
+          <!-- Signature -->
+          <div style="margin-top:auto;padding-top:30px;text-align:right">
+            <div style="display:inline-block;text-align:center">
+              <div style="font-size:9.5pt;color:#1B3A6B;font-weight:600">SD/–</div>
+              <div style="font-size:9.5pt;font-weight:700;color:#1B3A6B;margin-top:2px">Head of the Institution</div>
+              <div style="font-size:9pt;color:#475569">Dasarath Bagdi</div>
+              <div style="font-size:9pt;color:#475569">${school}</div>
+            </div>
+          </div>
+        </div>
+        ${edFoot(`${examTitle} · ${grp.label}`)}
+      </div>`;
+    }).join('');
+
+  } else {
+    // Fallback: simple landscape table grouped by session
+    const TH=`class="ed-th"`;
+    const mkR=(r,i)=>`<tr class="${i%2===0?'ed-td-even':'ed-td-odd'}">
+      <td style="padding:7px 10px;font-weight:700;color:#1B3A6B;font-size:9.5pt;border:1px solid #B0C4DE">${r.date}</td>
+      <td style="padding:7px 10px;font-size:9pt;border:1px solid #B0C4DE">${r.day}</td>
+      <td style="padding:7px 10px;font-weight:700;color:#8B5E0A;font-size:10pt;border:1px solid #B0C4DE">${r.subject}</td>
+      <td style="padding:7px 10px;font-size:9pt;border:1px solid #B0C4DE">${r.classes||r.className||''}</td>
+      <td style="padding:7px 10px;font-size:9pt;font-weight:600;border:1px solid #B0C4DE">${r.time||''}</td>
+    </tr>`;
+    return `<div class="ed-page-land">${edHdr('Examination Programme','')}
+    <div style="padding:14px 16px">
+      <div style="font-size:10pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;padding:8px 12px;border-left:5px solid #1B3A6B;margin-bottom:10px">1st Half</div>
+      <table style="width:100%;border-collapse:collapse"><thead><tr>
+        <th ${TH} style="width:16%">Date</th><th ${TH} style="width:10%">Day</th>
+        <th ${TH} style="width:28%">Subject</th><th ${TH} style="width:26%">Classes</th><th ${TH}>Time</th>
+      </tr></thead><tbody>${ED.routine.h1.map(mkR).join('')}</tbody></table>
+      <div style="font-size:10pt;font-weight:700;color:#1B3A6B;background:#DCE9F8;padding:8px 12px;border-left:5px solid #1B3A6B;margin:16px 0 10px">2nd Half</div>
+      <table style="width:100%;border-collapse:collapse"><thead><tr>
+        <th ${TH} style="width:16%">Date</th><th ${TH} style="width:10%">Day</th>
+        <th ${TH} style="width:28%">Subject</th><th ${TH} style="width:26%">Classes</th><th ${TH}>Time</th>
+      </tr></thead><tbody>${ED.routine.h2.map(mkR).join('')}</tbody></table>
+      <div style="margin-top:20px;font-size:9pt;color:#64748B;font-style:italic">SD/– Head of the Institution</div>
+    </div>${edFoot('Examination Programme · '+examTitle)}</div>`;
+  }
 }
 
 function edGenBoard(rows, halfLabel) {
@@ -6834,7 +7030,7 @@ function edShowPrintSettings(type) {
   }
   if(!_edPrintHtml){ showAlert('No data. Upload Excel first.','warning'); return; }
 
-  const isPort = (type==='dutycards'||type==='answerscript');
+  const isPort = (type==='dutycards'||type==='answerscript'||type==='routine');
 
   const overlay = document.createElement('div');
   overlay.id = 'ed-preview-overlay';
