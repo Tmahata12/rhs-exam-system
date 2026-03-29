@@ -5170,6 +5170,30 @@ async function renderExamDocs(el) {
       <div id="ed-import-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
     </div>
 
+    <!-- ══ STEP 1b: Student Import ══ -->
+    <div class="card" style="margin-bottom:16px;border-left:4px solid #10b981">
+      <div class="card-title">👨‍🎓 Step 1b — Student List Import (আলাদা Excel)</div>
+      <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">
+        Student Excel-এ <b>Roll, Name, Class, Section</b> — এই ৪টা column থাকলেই হবে
+      </p>
+      <div id="ed-stu-zone"
+        style="border:2px dashed var(--border);border-radius:10px;padding:20px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:10px"
+        ondragover="event.preventDefault();this.style.borderColor='#10b981'"
+        ondragleave="this.style.borderColor=''"
+        ondrop="edStudentDrop(event)"
+        onclick="if(event.target.tagName!=='INPUT') document.getElementById('ed-stu-input').click()">
+        <input type="file" id="ed-stu-input" accept=".xlsx,.xls" style="display:none" onchange="edStudentLoad(event)">
+        <div style="font-size:26px;margin-bottom:6px">👨‍🎓</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:2px">Student List Excel upload করুন</div>
+        <div style="font-size:11px;color:var(--text-2)">Roll · Name · Class · Section</div>
+      </div>
+      <div id="ed-stu-status" style="font-size:12px;color:var(--text-2);margin-bottom:8px"></div>
+      <button class="btn btn-success" onclick="edImportStudents()" id="ed-stu-btn" disabled
+        style="background:#10b981;color:white;border:none">
+        👨‍🎓 Import Students to EMS
+      </button>
+    </div>
+
     <!-- ══ STEP 2: Generate from EMS ══ -->
     <div class="card" style="margin-bottom:16px;border-left:4px solid var(--primary)">
       <div class="card-title">⚡ Step 2 — EMS Data থেকে Documents Generate করুন</div>
@@ -5710,6 +5734,113 @@ function edLoadFile_printOnly() {
   if(!_edWb){ showAlert('Upload Excel first.','error'); return; }
   if(!ED.loaded){ showAlert('File not parsed yet.','error'); return; }
   showAlert('✅ Data ready for printing!','success');
+}
+
+// ── Student Import ────────────────────────────────────────────────────────────
+let _edStuWb = null;
+
+function edStudentDrop(e) {
+  e.preventDefault();
+  document.getElementById('ed-stu-zone').style.borderColor='';
+  if(e.dataTransfer.files[0]) edStudentProcess(e.dataTransfer.files[0]);
+}
+function edStudentLoad(e) {
+  if(e.target.files[0]) edStudentProcess(e.target.files[0]);
+}
+
+function edStudentProcess(file) {
+  const statusEl = document.getElementById('ed-stu-status');
+  if(statusEl) statusEl.textContent = '⏳ Parsing student file...';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      _edStuWb = XLSX.read(ev.target.result, {type:'array'});
+      // Preview count
+      const ws = _edStuWb.Sheets[_edStuWb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      // Find header row
+      let dataStart = 0;
+      for(let i=0;i<rows.length;i++) {
+        const r = rows[i].map(c=>String(c||'').toLowerCase());
+        if(r.some(c=>c.includes('roll')) && r.some(c=>c.includes('name'))) {
+          dataStart = i+1; break;
+        }
+      }
+      const count = rows.slice(dataStart).filter(r=>r[0]||r[1]).length;
+      if(statusEl) statusEl.innerHTML = `✅ <b>${count}</b> students found in "${file.name}"`;
+      const btn = document.getElementById('ed-stu-btn');
+      if(btn) btn.disabled = false;
+      showAlert(`${count} students parsed!`, 'success');
+    } catch(err) {
+      if(statusEl) statusEl.textContent = '❌ Error: ' + err.message;
+      showAlert('Error: '+err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function edImportStudents() {
+  if(!_edStuWb){ showAlert('Upload student Excel first.','error'); return; }
+  const btn = document.getElementById('ed-stu-btn');
+  const statusEl = document.getElementById('ed-stu-status');
+  btn.disabled = true;
+  btn.textContent = '⏳ Importing...';
+
+  try {
+    const ws = _edStuWb.Sheets[_edStuWb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+
+    // Find header row — detect Roll, Name, Class, Section columns
+    let rollCol=0, nameCol=1, classCol=2, secCol=3;
+    let dataStart = 1;
+    for(let i=0;i<Math.min(rows.length,5);i++) {
+      const r = rows[i].map(c=>String(c||'').toLowerCase().trim());
+      if(r.some(c=>c.includes('roll'))) {
+        rollCol  = r.findIndex(c=>c.includes('roll'));
+        nameCol  = r.findIndex(c=>c.includes('name'));
+        classCol = r.findIndex(c=>c.includes('class'));
+        secCol   = r.findIndex(c=>c.includes('sec'));
+        if(nameCol<0) nameCol=rollCol+1;
+        if(classCol<0) classCol=nameCol+1;
+        if(secCol<0) secCol=classCol+1;
+        dataStart = i+1;
+        break;
+      }
+    }
+
+    // Parse students
+    const students = [];
+    rows.slice(dataStart).forEach(r => {
+      const roll = String(r[rollCol]||'').trim();
+      const name = String(r[nameCol]||'').trim();
+      const cls  = String(r[classCol]||'').trim();
+      const sec  = String(r[secCol]||'').trim();
+      if(!roll && !name) return;
+      students.push({
+        id:   'stu_'+roll+'_'+cls+'_'+sec,
+        roll, name, class: cls,
+        classId: cls, section: sec,
+        gender: (sec==='A'||sec==='a') ? 'Male' : 'Female',
+      });
+    });
+
+    if(!students.length){ showAlert('No students found. Check column names.','error'); return; }
+
+    // Save to MongoDB
+    if(statusEl) statusEl.textContent = `☁️ Saving ${students.length} students...`;
+    await DB.set('students', students);
+
+    if(statusEl) statusEl.innerHTML = `✅ <b>${students.length}</b> students imported to EMS!`;
+    showAlert(`✅ ${students.length} students saved to MongoDB!`, 'success');
+
+  } catch(err) {
+    console.error(err);
+    showAlert('Import error: '+err.message, 'error');
+    if(statusEl) statusEl.textContent = '❌ Error: '+err.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '👨‍🎓 Import Students to EMS';
 }
 
 // ── Parse workbook ───────────────────────────────────────────────────────────
