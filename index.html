@@ -1546,13 +1546,20 @@ async function renderInvigilator(el) {
     ]);
     const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
 
+    // Build teacher checkboxes for exclusion
+    const tchkBoxes = teachers.map(t=>`
+      <label style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;cursor:pointer;font-size:12px;background:var(--bg);border:1px solid var(--border);white-space:nowrap">
+        <input type="checkbox" class="ir-exclude-chk" value="${t.id}" style="width:13px;height:13px">
+        ${t.name}
+      </label>`).join('');
+
     el.innerHTML = `
     <div class="page-title">👮 Invigilator Duty Roster</div>
 
     <div class="tab-bar">
       <button class="tab-pill active" onclick="irTab('generate',this)">⚙️ Generate</button>
-      <button class="tab-pill" onclick="irTab('saved',this)">📁 Saved Rosters (${savedRosters.length})</button>
-      <button class="tab-pill" onclick="irTab('import',this)">📥 Excel Import</button>
+      <button class="tab-pill" onclick="irTab('saved',this)">📁 Saved (${savedRosters.length})</button>
+      <button class="tab-pill" onclick="irTab('import',this)">📥 Import</button>
     </div>
 
     <!-- GENERATE TAB -->
@@ -1560,7 +1567,7 @@ async function renderInvigilator(el) {
       <div class="card">
         <div class="card-title">⚙️ Roster Configuration</div>
         <div class="form-row">
-          <div class="form-group"><label>Select Exam *</label>
+          <div class="form-group"><label>Exam *</label>
             <select id="irExam" onchange="irLoadInfo()">
               <option value="">--Select--</option>${examOpts}
             </select>
@@ -1576,11 +1583,11 @@ async function renderInvigilator(el) {
           </div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Max Duties per Teacher per Day</label>
+          <div class="form-group"><label>Max Duties/Teacher/Day</label>
             <input type="number" id="irMaxDutyN" value="3" min="1" max="10">
           </div>
-          <div class="form-group"><label>Hall Name Prefix</label>
-            <input id="irHallPrefix" value="Hall">
+          <div class="form-group"><label>Hall Name Prefix (if no seating plan)</label>
+            <input id="irHallPrefix" value="R-">
           </div>
           <div class="form-group"><label>&nbsp;</label>
             <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
@@ -1592,32 +1599,58 @@ async function renderInvigilator(el) {
                 <input type="checkbox" id="irMaxDuty" checked style="width:15px;height:15px">
                 Apply max duties limit per day
               </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="irBalanceSessions" checked style="width:15px;height:15px">
+                Balance 1st & 2nd Half duties equally
+              </label>
             </div>
           </div>
         </div>
+
+        <!-- Teacher Exclusion -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px">
+            ❌ Exclude Teachers from Roster (check to exclude)
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:160px;overflow-y:auto;padding:8px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
+            ${tchkBoxes || '<span style="font-size:12px;color:var(--text-2)">No teachers found</span>'}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button onclick="document.querySelectorAll('.ir-exclude-chk').forEach(c=>c.checked=false)" 
+              style="font-size:11px;padding:3px 10px;border:1px solid var(--border);border-radius:5px;cursor:pointer;background:var(--bg);color:var(--text);font-family:inherit">
+              Clear All
+            </button>
+            <button onclick="document.querySelectorAll('.ir-exclude-chk').forEach(c=>c.checked=true)"
+              style="font-size:11px;padding:3px 10px;border:1px solid var(--border);border-radius:5px;cursor:pointer;background:var(--bg);color:var(--text);font-family:inherit">
+              Select All
+            </button>
+          </div>
+        </div>
+
         <div id="irInfoBox" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px;color:#166534"></div>
         <div class="btn-group">
           <button class="btn btn-primary" onclick="generateRoster()">👮 Generate & Print</button>
           <button class="btn btn-success" onclick="generateRoster('save')">💾 Generate & Save</button>
-          <button class="btn btn-warning" onclick="generateRoster('excel')">📊 Generate & Excel</button>
+          <button class="btn btn-warning" onclick="generateRoster('excel')">📊 Export Excel</button>
         </div>
       </div>
 
-      <!-- Teacher list -->
+      <!-- Available Teachers -->
       <div class="card">
         <div class="card-title">👨‍🏫 Available Teachers (${teachers.length})</div>
         ${teachers.length ? `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Short Name</th><th>Subject</th><th>Phone</th></tr></thead>
+            <thead><tr><th>Name</th><th>Short Name</th><th>Subject</th><th>Classes</th><th>Phone</th></tr></thead>
             <tbody>${teachers.map(t=>`<tr>
               <td><strong>${t.name}</strong></td>
               <td>${t.shortName||'—'}</td>
               <td><small>${t.subject||'—'}</small></td>
+              <td><small>${t.classes||'—'}</small></td>
               <td>${t.phone||'—'}</td>
             </tr>`).join('')}</tbody>
           </table>
-        </div>` : `<p style="text-align:center;color:var(--text-2);padding:20px">No teachers added. Go to System → Teachers to add.</p>`}
+        </div>` : `<p style="text-align:center;color:var(--text-2);padding:20px">No teachers. Import from Exam Docs page.</p>`}
       </div>
     </div>
 
@@ -1628,23 +1661,22 @@ async function renderInvigilator(el) {
         ${savedRosters.length ? `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Exam</th><th>Date Generated</th><th>Total Duties</th><th>Teachers</th><th>Actions</th></tr></thead>
-            <tbody>
-              ${savedRosters.slice().reverse().map(r=>`
-              <tr>
-                <td><strong>${r.examName||'—'}</strong></td>
-                <td><small>${r.createdOn?fmt(r.createdOn.split('T')[0]):'—'}</small></td>
-                <td style="text-align:center">${r.roster?.length||'—'}</td>
-                <td style="text-align:center">${[...new Set((r.roster||[]).map(d=>d.teacherName))].length}</td>
-                <td>
-                  <div class="btn-group">
-                    <button class="btn btn-primary btn-sm" onclick="reprintRoster('${r.id}')">🖨️ Print</button>
-                    <button class="btn btn-warning btn-sm" onclick="exportRosterXLSX('${r.id}')">📊 Excel</button>
-                    <button class="btn btn-info btn-sm" onclick="whatsappRoster('${r.id}')">📱 Share</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteRoster('${r.id}')">🗑️</button>
-                  </div>
-                </td>
-              </tr>`).join('')}
+            <thead><tr><th>Exam</th><th>Generated</th><th>Total Duties</th><th>Teachers</th><th>Actions</th></tr></thead>
+            <tbody>${savedRosters.slice().reverse().map(r=>`
+            <tr>
+              <td><strong>${r.examName||'—'}</strong></td>
+              <td><small>${r.createdOn?fmt(r.createdOn.split('T')[0]):'—'}</small></td>
+              <td style="text-align:center">${r.roster?.length||'—'}</td>
+              <td style="text-align:center">${[...new Set((r.roster||[]).map(d=>d.teacherName))].length}</td>
+              <td>
+                <div class="btn-group">
+                  <button class="btn btn-primary btn-sm" onclick="reprintRoster('${r.id}')">🖨️ Print</button>
+                  <button class="btn btn-warning btn-sm" onclick="exportRosterXLSX('${r.id}')">📊 Excel</button>
+                  <button class="btn btn-info btn-sm" onclick="whatsappRoster('${r.id}')">📱 Share</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteRoster('${r.id}')">🗑️</button>
+                </div>
+              </td>
+            </tr>`).join('')}
             </tbody>
           </table>
         </div>` : '<p style="text-align:center;color:var(--text-2);padding:30px">No saved rosters yet.</p>'}
@@ -1654,9 +1686,9 @@ async function renderInvigilator(el) {
     <!-- IMPORT TAB -->
     <div id="ir-import" class="tab-panel">
       <div class="card">
-        <div class="card-title">📥 Import Invigilator Duty from Excel</div>
+        <div class="card-title">📥 Import from Excel</div>
         <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px">
-          <strong>📋 Excel format required columns:</strong><br>
+          <strong>📋 Required columns:</strong><br>
           <code style="background:#dbeafe;padding:2px 6px;border-radius:4px;font-size:12px">Date | Session | Hall | Teacher Name | Short Name | Phone</code>
         </div>
         <div class="form-row">
@@ -1682,73 +1714,174 @@ async function renderInvigilator(el) {
     window.irLoadInfo = async function() {
         const examId=document.getElementById('irExam').value;
         if(!examId) return;
-        const [tts]=await Promise.all([DB.get('examTimetables')]);
-        const examTT=tts.filter(t=>String(t.examId)===String(examId));
-        const dates=[...new Set(examTT.map(t=>t.date))];
-        const sessions=[...new Set(examTT.map(t=>t.session||''))];
-        const box=document.getElementById('irInfoBox');
-        box.style.display='block';
-        box.innerHTML=`📅 ${dates.length} exam days | ⏰ Sessions: ${sessions.join(', ')||'—'} | 👨‍🏫 ${teachers.length} teachers available`;
+        const [tts, sps] = await Promise.all([DB.get('examTimetables'), DB.get('seatingPlans')]);
+        const examTT = tts.filter(t=>String(t.examId)===String(examId));
+        const examPlan = sps.find(p=>String(p.examId)===String(examId));
+        const dates = [...new Set(examTT.map(t=>t.date))];
+        const sessions = [...new Set(examTT.map(t=>t.session||''))];
+        // Get actual room names from seating plan
+        const rooms = examPlan ? [...new Set(examPlan.plan.map(p=>p.roomName||p.roomNo||''))].filter(Boolean) : [];
+        const box = document.getElementById('irInfoBox');
+        box.style.display = 'block';
+        box.innerHTML = `📅 ${dates.length} exam days &nbsp;|&nbsp; ⏰ ${sessions.join(', ')||'—'} &nbsp;|&nbsp; 🏫 ${rooms.length ? rooms.join(', ') : 'No seating plan found'} &nbsp;|&nbsp; 👨‍🏫 ${teachers.length} teachers`;
     };
 }
 
 async function generateRoster(mode='print') {
-    const examId     = document.getElementById('irExam').value;
+    const examId       = document.getElementById('irExam').value;
     if(!examId){showAlert('Select an Exam.','error');return;}
-    const perHall    = parseInt(document.getElementById('irPerHall').value)||2;
-    const method     = document.getElementById('irMethod').value;
-    const noConflict = document.getElementById('irNoConflict').checked;
-    const maxDutyOn  = document.getElementById('irMaxDuty').checked;
-    const maxDutyN   = parseInt(document.getElementById('irMaxDutyN').value)||3;
-    const hallPrefix = document.getElementById('irHallPrefix').value||'Hall';
+    const perHall      = parseInt(document.getElementById('irPerHall').value)||2;
+    const method       = document.getElementById('irMethod').value;
+    const noConflict   = document.getElementById('irNoConflict').checked;
+    const maxDutyOn    = document.getElementById('irMaxDuty').checked;
+    const maxDutyN     = parseInt(document.getElementById('irMaxDutyN').value)||3;
+    const hallPrefix   = document.getElementById('irHallPrefix').value||'R-';
+    const balanceSess  = document.getElementById('irBalanceSessions')?.checked ?? true;
 
-    const [exams,teachers,timetables,routines,settings,halls]=await Promise.all([
-        DB.get('exams'),DB.get('teachers'),DB.get('examTimetables'),
-        DB.get('routines'),DB.getObj('settings'),DB.get('halls')]);
+    // Get excluded teacher IDs
+    const excludedIds = new Set(
+        [...document.querySelectorAll('.ir-exclude-chk:checked')].map(c=>c.value)
+    );
+
+    const [exams,allTeachers,timetables,routines,settings,halls,seatingPlans]=await Promise.all([
+        DB.get('exams'), DB.get('teachers'), DB.get('examTimetables'),
+        DB.get('routines'), DB.getObj('settings'), DB.get('halls'), DB.get('seatingPlans')
+    ]);
+
+    // Filter out excluded teachers
+    const teachers = allTeachers.filter(t=>!excludedIds.has(String(t.id)));
+    if(!teachers.length){showAlert('No available teachers (all excluded?).','error');return;}
 
     const exam   = exams.find(e=>String(e.id)===String(examId));
     const examTT = timetables.filter(t=>String(t.examId)===String(examId));
     if(!exam){showAlert('Exam not found.','error');return;}
-    if(!teachers.length){showAlert('No teachers found. Add teachers first.','error');return;}
-    if(!examTT.length){showAlert('No timetable. Create timetable first.','error');return;}
+    if(!examTT.length){showAlert('No timetable found for this exam.','error');return;}
 
     const schoolName = settings.schoolName||'Ramnagar High School (H.S.)';
+
+    // ── Get ACTUAL room names from seating plan ──
+    const examPlan = seatingPlans.find(p=>String(p.examId)===String(examId));
+    let roomNames = [];
+    if(examPlan && examPlan.plan && examPlan.plan.length) {
+        // Get unique room names in order
+        roomNames = [...new Set(examPlan.plan.map(p=>p.roomName||p.roomNo||''))].filter(Boolean);
+        roomNames.sort((a,b)=>{
+            const na=parseInt(String(a).replace(/\D/g,'')||0);
+            const nb=parseInt(String(b).replace(/\D/g,'')||0);
+            return na-nb;
+        });
+    } else if(halls.length) {
+        roomNames = halls.map(h=>h.name||h.id);
+    } else {
+        // Fallback: generate room names with prefix
+        const total = Math.max(1, Math.ceil((await DB.get('students').catch(()=>[])).length / 30));
+        roomNames = Array.from({length:total}, (_,i)=>`${hallPrefix}${i+1}`);
+    }
+
+    if(!roomNames.length){showAlert('No rooms found. Add seating plan or halls first.','error');return;}
+
     const dates = [...new Set(examTT.map(t=>t.date))].sort();
 
+    // Build teacher→class mapping (to avoid own-class duty)
     const tClasses={};
+    // From routines
     routines.forEach(r=>{
         const tid=String(r.teacher||r.teacherId||'');
         if(!tClasses[tid])tClasses[tid]=new Set();
         tClasses[tid].add(r.className||r.class||'');
     });
+    // Also from teacher assignments field
+    teachers.forEach(t=>{
+        if(t.assignments) t.assignments.forEach(a=>{
+            const tid=String(t.id);
+            if(!tClasses[tid])tClasses[tid]=new Set();
+            tClasses[tid].add(a.class||'');
+        });
+        if(t.classes) String(t.classes).split(',').forEach(c=>{
+            const tid=String(t.id);
+            if(!tClasses[tid])tClasses[tid]=new Set();
+            tClasses[tid].add(c.trim());
+        });
+    });
 
-    const dutyCount={};teachers.forEach(t=>dutyCount[String(t.id)]=0);
+    // Duty counters
+    const dutyCount={};
+    const sessionDutyCount={}; // per session balance
+    teachers.forEach(t=>{
+        dutyCount[String(t.id)]=0;
+        sessionDutyCount[String(t.id)]={'1st Half':0,'2nd Half':0};
+    });
+
     const roster=[];
 
-    // Get hall count from saved seating plan or halls list
-    const savedPlans = await DB.get('seatingPlans');
-    const examPlan = savedPlans.find(p=>String(p.examId)===String(examId));
-    const totalHalls = examPlan ? examPlan.totalHalls :
-        halls.length ? halls.length :
-        Math.max(1, Math.ceil((await DB.get('students')).length / 30));
-
     for(const date of dates){
-        const dayDuty={};teachers.forEach(t=>dayDuty[String(t.id)]=0);
-        const sessions=[...new Set(examTT.filter(t=>t.date===date).map(t=>t.session||'1st Half'))];
+        const dayDuty={};
+        teachers.forEach(t=>dayDuty[String(t.id)]=0);
+        const sessions=[...new Set(examTT.filter(t=>t.date===date).map(t=>t.session||'1st Half'))].sort();
+
         for(const session of sessions){
-            const examCls=new Set(examTT.filter(t=>t.date===date&&(t.session||'1st Half')===session).map(t=>t.className||''));
-            for(let h=1;h<=totalHalls;h++){
+            const sessionKey = session.includes('2nd')||session.includes('2H') ? '2nd Half' : '1st Half';
+            const examCls=new Set(
+                examTT.filter(t=>t.date===date&&(t.session||'1st Half')===session)
+                      .map(t=>t.className||t.class||'')
+            );
+
+            for(const roomName of roomNames){
+                // Sort teachers by assignment method
                 let sorted=[...teachers];
-                if(method==='workload') sorted.sort((a,b)=>(dutyCount[String(a.id)]||0)-(dutyCount[String(b.id)]||0));
-                let asgn=0;
+                if(method==='workload') {
+                    sorted.sort((a,b)=>{
+                        const da=dutyCount[String(a.id)]||0;
+                        const db=dutyCount[String(b.id)]||0;
+                        if(da!==db) return da-db;
+                        // Secondary: balance sessions
+                        if(balanceSess){
+                            const sa=(sessionDutyCount[String(a.id)]||{})[sessionKey]||0;
+                            const sb=(sessionDutyCount[String(b.id)]||{})[sessionKey]||0;
+                            return sa-sb;
+                        }
+                        return 0;
+                    });
+                }
+
+                let assigned=0;
                 for(const t of sorted){
-                    if(asgn>=perHall) break;
+                    if(assigned>=perHall) break;
                     const tid=String(t.id);
-                    if(noConflict){const tc=tClasses[tid]||new Set();if([...examCls].some(c=>tc.has(c)))continue;}
-                    if(maxDutyOn&&dayDuty[tid]>=maxDutyN)continue;
-                    roster.push({date,session,hall:`${hallPrefix} ${h}`,
-                        teacherName:t.name,shortName:t.shortName||'',phone:t.phone||''});
-                    dutyCount[tid]++;dayDuty[tid]++;asgn++;
+
+                    // Skip if excluded (double-check)
+                    if(excludedIds.has(tid)) continue;
+
+                    // Skip if teaches this class today
+                    if(noConflict){
+                        const tc=tClasses[tid]||new Set();
+                        if([...examCls].some(c=>c&&tc.has(c))) continue;
+                    }
+
+                    // Skip if max daily duties reached
+                    if(maxDutyOn&&(dayDuty[tid]||0)>=maxDutyN) continue;
+
+                    // Skip if already assigned to this room+session
+                    const alreadyInRoom = roster.some(r=>
+                        r.date===date&&r.session===session&&r.hall===roomName&&
+                        (r.teacherName===t.name||r.teacherName2===t.name)
+                    );
+                    if(alreadyInRoom) continue;
+
+                    // Assign
+                    roster.push({
+                        date, session, sessionKey,
+                        hall: roomName,
+                        teacherName: t.name,
+                        shortName: t.shortName||'',
+                        phone: t.phone||'',
+                        subject: examTT.filter(tt=>tt.date===date&&(tt.session||'1st Half')===session)
+                                       .map(tt=>tt.subject).join(', ')
+                    });
+                    dutyCount[tid]++;
+                    dayDuty[tid]=(dayDuty[tid]||0)+1;
+                    if(sessionDutyCount[tid]) sessionDutyCount[tid][sessionKey]=(sessionDutyCount[tid][sessionKey]||0)+1;
+                    assigned++;
                 }
             }
         }
@@ -1767,73 +1900,105 @@ async function generateRoster(mode='print') {
 
     // EXCEL
     if(mode==='excel'){
-        const ws=XLSX.utils.json_to_sheet(roster.map(r=>({'Date':fmt(r.date),'Session':r.session,'Hall':r.hall,'Teacher':r.teacherName,'Short':r.shortName,'Phone':r.phone})));
-        ws['!cols']=[{wch:14},{wch:12},{wch:10},{wch:24},{wch:10},{wch:14}];
+        const ws=XLSX.utils.json_to_sheet(roster.map(r=>({
+            'Date':r.date,'Day':new Date(r.date).toLocaleDateString('en-IN',{weekday:'short'}),
+            'Session':r.session,'Hall/Room':r.hall,'Subject':r.subject,
+            'Teacher':r.teacherName,'Short':r.shortName,'Phone':r.phone
+        })));
+        ws['!cols']=[{wch:12},{wch:5},{wch:12},{wch:8},{wch:18},{wch:24},{wch:10},{wch:14}];
         const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Invigilator Roster');
         XLSX.writeFile(wb,`Roster_${exam.name}.xlsx`);
         showAlert('✅ Exported!','success');
         return;
     }
 
-    // PRINT
-    const byDate={};roster.forEach(r=>{if(!byDate[r.date])byDate[r.date]=[];byDate[r.date].push(r);});
-    const summary={};roster.forEach(r=>{if(!summary[r.teacherName])summary[r.teacherName]={count:0,phone:r.phone};summary[r.teacherName].count++;});
+    // PRINT — build summary stats
+    const byDate={};
+    roster.forEach(r=>{if(!byDate[r.date])byDate[r.date]=[];byDate[r.date].push(r);});
+    const summary={};
+    roster.forEach(r=>{
+        if(!summary[r.teacherName]) summary[r.teacherName]={count:0,'1H':0,'2H':0,phone:r.phone};
+        summary[r.teacherName].count++;
+        summary[r.teacherName][r.sessionKey==='1st Half'?'1H':'2H']++;
+    });
 
     let html=`<div style="font-family:Arial,sans-serif">
-    <div style="text-align:center;border-bottom:3px double #1e3c72;padding-bottom:12px;margin-bottom:20px">
-      <div style="font-size:20px;font-weight:700;color:#1e3c72">🏫 ${schoolName}</div>
+    <div style="text-align:center;border-bottom:3px double #1B3A6B;padding-bottom:12px;margin-bottom:20px">
+      <div style="font-size:20px;font-weight:700;color:#1B3A6B">${schoolName}</div>
       <div style="font-size:15px;font-weight:700;color:#2a5298;margin-top:4px">Invigilator Duty Roster — ${exam.name}</div>
-      <div style="font-size:12px;color:#555;margin-top:4px">Total Duties: ${roster.length} | Teachers: ${Object.keys(summary).length} | Halls: ${totalHalls}</div>
+      <div style="font-size:12px;color:#555;margin-top:4px">
+        Total Duties: ${roster.length} &nbsp;|&nbsp; Active Teachers: ${Object.keys(summary).length} &nbsp;|&nbsp;
+        Excluded: ${excludedIds.size} &nbsp;|&nbsp; Halls: ${roomNames.join(', ')}
+      </div>
     </div>`;
 
     for(const date of dates){
         const dStr=new Date(date).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short',year:'numeric'});
-        const rows=(byDate[date]||[]).map(r=>`<tr>
-          <td style="padding:8px 10px;border:1px solid #ddd">${r.session}</td>
-          <td style="padding:8px 10px;border:1px solid #ddd">${r.hall}</td>
-          <td style="padding:8px 10px;border:1px solid #ddd"><strong>${r.teacherName}</strong>${r.shortName?' ('+r.shortName+')':''}</td>
-          <td style="padding:8px 10px;border:1px solid #ddd">${r.phone||'—'}</td>
-          <td style="padding:8px 10px;border:1px solid #ddd;width:120px"></td>
-        </tr>`).join('');
+        const dayRows=(byDate[date]||[]);
+        // Group by session
+        const bySess={};
+        dayRows.forEach(r=>{if(!bySess[r.session])bySess[r.session]=[];bySess[r.session].push(r);});
+
         html+=`<div style="margin-bottom:22px;page-break-inside:avoid">
-          <div style="background:#1e3c72;color:#fff;padding:8px 14px;font-weight:700;border-radius:4px;margin-bottom:8px">📅 ${dStr}</div>
+          <div style="background:#1B3A6B;color:#fff;padding:8px 14px;font-weight:700;border-radius:4px 4px 0 0">📅 ${dStr}</div>
           <table style="width:100%;border-collapse:collapse;font-size:12px">
-            <thead><tr style="background:#2a5298;color:#fff">
-              <th style="padding:8px 10px;text-align:left">Session</th>
-              <th style="padding:8px 10px;text-align:left">Hall</th>
-              <th style="padding:8px 10px;text-align:left">Teacher</th>
-              <th style="padding:8px 10px;text-align:left">Phone</th>
-              <th style="padding:8px 10px;text-align:left">Signature</th>
+            <thead><tr style="background:#2C4F8C;color:#fff">
+              <th style="padding:7px 10px;text-align:left">Session</th>
+              <th style="padding:7px 10px;text-align:left">Hall / Room</th>
+              <th style="padding:7px 10px;text-align:left">Subject</th>
+              <th style="padding:7px 10px;text-align:left">Invigilator</th>
+              <th style="padding:7px 10px;text-align:left">Phone</th>
+              <th style="padding:7px 10px;text-align:left">Signature</th>
             </tr></thead>
-            <tbody>${rows}</tbody>
+            <tbody>
+        ${dayRows.map((r,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
+              <td style="padding:7px 10px;border:1px solid #C8D8EC;font-weight:600;color:#1B3A6B">${r.session}</td>
+              <td style="padding:7px 10px;border:1px solid #C8D8EC;font-weight:700;color:#1B3A6B">${r.hall}</td>
+              <td style="padding:7px 10px;border:1px solid #C8D8EC;color:#8B5E0A">${r.subject||'—'}</td>
+              <td style="padding:7px 10px;border:1px solid #C8D8EC"><strong>${r.teacherName}</strong>${r.shortName?' ('+r.shortName+')':''}</td>
+              <td style="padding:7px 10px;border:1px solid #C8D8EC">${r.phone||'—'}</td>
+              <td style="padding:7px 10px;border:1px solid #C8D8EC;width:120px"></td>
+            </tr>`).join('')}
+            </tbody>
           </table>
         </div>`;
     }
 
-    const sumRows=Object.entries(summary).sort((a,b)=>b[1].count-a[1].count)
-        .map(([n,d],i)=>`<tr style="background:${i%2?'#f5f8ff':'#fff'}">
-          <td style="padding:7px 10px;border:1px solid #ddd">${n}</td>
-          <td style="padding:7px 10px;border:1px solid #ddd">${d.phone}</td>
-          <td style="padding:7px 10px;border:1px solid #ddd;text-align:center;font-weight:700">${d.count}</td>
-          <td style="padding:7px 10px;border:1px solid #ddd;width:150px"></td>
+    // Duty summary table
+    const sumRows=Object.entries(summary)
+        .sort((a,b)=>b[1].count-a[1].count)
+        .map(([n,d],i)=>`<tr style="background:${i%2?'#F4F8FF':'#fff'}">
+          <td style="padding:7px 10px;border:1px solid #C8D8EC">${n}</td>
+          <td style="padding:7px 10px;border:1px solid #C8D8EC">${d.phone||'—'}</td>
+          <td style="padding:7px 10px;border:1px solid #C8D8EC;text-align:center">${d['1H']}</td>
+          <td style="padding:7px 10px;border:1px solid #C8D8EC;text-align:center">${d['2H']}</td>
+          <td style="padding:7px 10px;border:1px solid #C8D8EC;text-align:center;font-weight:700;color:#1B3A6B">${d.count}</td>
+          <td style="padding:7px 10px;border:1px solid #C8D8EC;width:150px"></td>
         </tr>`).join('');
 
-    html+=`<div style="margin-top:20px">
-      <div style="font-size:15px;font-weight:700;color:#1e3c72;border-bottom:2px solid #1e3c72;padding-bottom:6px;margin-bottom:10px">📊 Teacher Duty Summary</div>
+    html+=`<div style="margin-top:24px;page-break-inside:avoid">
+      <div style="font-size:15px;font-weight:700;color:#1B3A6B;border-bottom:2px solid #1B3A6B;padding-bottom:6px;margin-bottom:10px">
+        📊 Teacher Duty Summary
+        ${excludedIds.size>0?`<span style="font-size:12px;color:#dc2626;font-weight:400;margin-left:12px">⚠️ ${excludedIds.size} teacher(s) excluded</span>`:''}
+      </div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:#1e3c72;color:#fff">
-          <th style="padding:8px 10px">Teacher</th><th style="padding:8px 10px">Phone</th>
-          <th style="padding:8px 10px;text-align:center">Total Duties</th><th style="padding:8px 10px">Acknowledgement</th>
+        <thead><tr style="background:#1B3A6B;color:#fff">
+          <th style="padding:7px 10px">Teacher</th>
+          <th style="padding:7px 10px">Phone</th>
+          <th style="padding:7px 10px;text-align:center">1st Half</th>
+          <th style="padding:7px 10px;text-align:center">2nd Half</th>
+          <th style="padding:7px 10px;text-align:center">Total</th>
+          <th style="padding:7px 10px">Acknowledgement</th>
         </tr></thead>
         <tbody>${sumRows}</tbody>
       </table>
     </div>
     <div style="display:flex;justify-content:space-between;margin-top:50px">
-      <div style="text-align:center"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:12px;margin-top:40px">Exam Controller</div></div>
-      <div style="text-align:center"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:12px;margin-top:40px">Headmaster / Principal</div></div>
+      <div style="text-align:center"><div style="border-top:1px solid #333;width:200px;padding-top:5px;font-size:12px;margin-top:40px">Exam Controller</div></div>
+      <div style="text-align:center"><div style="border-top:1px solid #333;width:200px;padding-top:5px;font-size:12px;margin-top:40px">Headmaster / Principal</div></div>
     </div></div>`;
 
-    showAlert(`✅ ${roster.length} duties assigned!`,'success');
+    showAlert(`✅ ${roster.length} duties assigned across ${roomNames.length} halls!`,'success');
     printPreview(html, `Invigilator Roster — ${exam.name}`);
 }
 
