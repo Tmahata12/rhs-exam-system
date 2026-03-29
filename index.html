@@ -468,6 +468,9 @@ tbody tr:hover td { background:#f8faff; }
       <div class="sidebar-item" onclick="showPage('invigilator')" id="nav-invigilator">
         <span class="icon">👮</span><span>Invigilator</span>
       </div>
+      <div class="sidebar-item" onclick="showPage('teachers')" id="nav-teachers">
+        <span class="icon">👩‍🏫</span><span>Teachers</span>
+      </div>
       <div class="sidebar-section">Students</div>
       <div class="sidebar-item" onclick="showPage('students')" id="nav-students">
         <span class="icon">👨‍🎓</span><span>Students</span>
@@ -725,6 +728,7 @@ function showPage(page) {
         reexam:      renderReExam,
         qpaper:      renderQPaper,
         examdocs:    renderExamDocs,
+        teachers:    renderTeachers,
     };
     if (pages[page]) {
         content.innerHTML = '<div style="text-align:center;padding:60px;color:#aaa;">⏳ Loading...</div>';
@@ -5165,6 +5169,346 @@ window.addEventListener('beforeunload', e=>{
     }
 });
 
+// ── TEACHERS PAGE ─────────────────────────────────────────────────────────────
+async function renderTeachers(el) {
+  const teachers = await DB.get('teachers').catch(()=>[]);
+
+  el.innerHTML = `
+  <div class="page-title">👩‍🏫 Teachers
+    <button class="btn btn-primary btn-sm" onclick="tchShowModal()" style="margin-left:12px;font-size:12px">➕ Add Teacher</button>
+  </div>
+
+  <div style="padding:0 24px 24px">
+    <!-- Stats -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+      <div class="stat-card">
+        <div class="stat-value">${teachers.length}</div>
+        <div class="stat-label">Total Teachers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${[...new Set(teachers.flatMap(t=>(t.subject||'').split(',').map(s=>s.trim()).filter(Boolean)))].length}</div>
+        <div class="stat-label">Subjects Covered</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${teachers.filter(t=>t.phone).length}</div>
+        <div class="stat-label">With Phone</div>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center">
+      <input id="tch-search" type="text" placeholder="🔍 Search by name or subject..."
+        style="flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:13px;font-family:inherit"
+        oninput="tchFilter()">
+      <button class="btn btn-secondary btn-sm" onclick="tchImportFromInvigilator()" title="Import names from Invigilator Roster">
+        📥 Import from Roster
+      </button>
+      <button class="btn btn-warning btn-sm" onclick="tchExport()" title="Export to Excel">
+        📊 Export
+      </button>
+      <button class="btn btn-danger btn-sm" onclick="tchDeleteAll()" title="Delete all teachers">
+        🗑️ Clear All
+      </button>
+    </div>
+
+    <!-- Table -->
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table id="tch-table">
+          <thead>
+            <tr>
+              <th style="width:40px">#</th>
+              <th>Full Name</th>
+              <th style="width:120px">Short Name</th>
+              <th>Subject(s)</th>
+              <th>Classes</th>
+              <th style="width:120px">Phone</th>
+              <th style="width:110px">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tch-body">
+            ${teachers.length ? teachers.map((t,i)=>tchRow(t,i)).join('') :
+              `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-2)">
+                No teachers yet. Click "Add Teacher" or "Import from Roster".
+              </td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
+}
+
+function tchRow(t,i) {
+  return `<tr id="tch-row-${t.id}">
+    <td style="text-align:center;color:var(--text-2)">${i+1}</td>
+    <td><strong>${t.name||'—'}</strong></td>
+    <td>${t.shortName||'—'}</td>
+    <td><small>${t.subject||'—'}</small></td>
+    <td><small>${t.classes||'—'}</small></td>
+    <td>${t.phone||'—'}</td>
+    <td>
+      <div class="btn-group">
+        <button class="btn btn-info btn-sm" onclick="tchShowModal('${t.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="tchDelete('${t.id}')">🗑️</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function tchFilter() {
+  const q = document.getElementById('tch-search')?.value.toLowerCase()||'';
+  document.querySelectorAll('#tch-table tbody tr').forEach(row=>{
+    const txt = row.textContent.toLowerCase();
+    row.style.display = (!q || txt.includes(q)) ? '' : 'none';
+  });
+}
+
+async function tchShowModal(editId=null) {
+  const teachers = await DB.get('teachers').catch(()=>[]);
+  const t = editId ? teachers.find(x=>x.id===editId) : null;
+
+  const m = document.createElement('div');
+  m.className = 'modal-overlay';
+  m.innerHTML = `
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-header">
+      <h3>${editId ? '✏️ Edit Teacher' : '➕ Add Teacher'}</h3>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px 20px">
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Full Name *</label>
+        <input id="tm-name" type="text" value="${t?.name||''}" placeholder="e.g. SUBODH KUMAR SAHA"
+          style="font-family:inherit" oninput="tchAutoShort()">
+      </div>
+      <div class="form-group">
+        <label>Short Name</label>
+        <input id="tm-short" type="text" value="${t?.shortName||''}" placeholder="e.g. S.K.S"
+          style="font-family:inherit">
+      </div>
+      <div class="form-group">
+        <label>Phone</label>
+        <input id="tm-phone" type="text" value="${t?.phone||''}" placeholder="Mobile number"
+          style="font-family:inherit">
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Subject(s) <small style="color:var(--text-2)">(comma separated)</small></label>
+        <input id="tm-subj" type="text" value="${t?.subject||''}" placeholder="e.g. English, History"
+          style="font-family:inherit">
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>Classes <small style="color:var(--text-2)">(comma separated)</small></label>
+        <input id="tm-cls" type="text" value="${t?.classes||''}" placeholder="e.g. VII, VIII, IX"
+          style="font-family:inherit">
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--border)">
+      <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn btn-primary" onclick="tchSave('${editId||''}')">
+        ${editId ? '💾 Save Changes' : '➕ Add Teacher'}
+      </button>
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+  document.getElementById('tm-name').focus();
+}
+
+function tchAutoShort() {
+  const name = document.getElementById('tm-name')?.value.trim()||'';
+  const shortEl = document.getElementById('tm-short');
+  if(!shortEl||shortEl.value) return;
+  // Auto generate: SUBODH KUMAR SAHA → S.K.S
+  const parts = name.split(' ').filter(Boolean);
+  if(parts.length>1) shortEl.value = parts.map(w=>w[0]).join('.')+'.';
+}
+
+async function tchSave(editId='') {
+  const name  = document.getElementById('tm-name')?.value.trim();
+  const short = document.getElementById('tm-short')?.value.trim();
+  const phone = document.getElementById('tm-phone')?.value.trim();
+  const subj  = document.getElementById('tm-subj')?.value.trim();
+  const cls   = document.getElementById('tm-cls')?.value.trim();
+
+  if(!name){ showAlert('Name is required.','error'); return; }
+
+  const teachers = await DB.get('teachers').catch(()=>[]);
+
+  if(editId) {
+    const idx = teachers.findIndex(t=>t.id===editId);
+    if(idx>=0) {
+      teachers[idx] = {...teachers[idx], name, shortName:short, phone, subject:subj, classes:cls};
+    }
+  } else {
+    // Check duplicate
+    if(teachers.find(t=>t.name.toUpperCase()===name.toUpperCase())) {
+      showAlert('Teacher already exists!','warning'); return;
+    }
+    teachers.push({
+      id: 'tch_'+Date.now()+'_'+Math.random().toString(36).slice(2,5),
+      name, shortName:short, phone, subject:subj, classes:cls
+    });
+  }
+
+  await DB.set('teachers', teachers);
+  document.querySelector('.modal-overlay')?.remove();
+  showAlert(editId ? '✅ Teacher updated!' : '✅ Teacher added!', 'success');
+  renderTeachers(document.getElementById('mainContent'));
+}
+
+async function tchDelete(id) {
+  const teachers = await DB.get('teachers').catch(()=>[]);
+  const t = teachers.find(x=>x.id===id);
+  if(!t) return;
+  if(!confirm(`Delete "${t.name}"?`)) return;
+  await DB.set('teachers', teachers.filter(x=>x.id!==id));
+  showAlert('✅ Teacher deleted.','success');
+  renderTeachers(document.getElementById('mainContent'));
+}
+
+async function tchDeleteAll() {
+  if(!confirm('Delete ALL teachers? This cannot be undone.')) return;
+  await DB.set('teachers',[]);
+  showAlert('All teachers deleted.','success');
+  renderTeachers(document.getElementById('mainContent'));
+}
+
+async function tchImportFromInvigilator() {
+  const [rosters, teachers] = await Promise.all([
+    DB.get('invigilatorRosters').catch(()=>[]),
+    DB.get('teachers').catch(()=>[])
+  ]);
+  const existingNames = new Set(teachers.map(t=>t.name.toUpperCase()));
+  let added = 0;
+  rosters.forEach(r=>{
+    (r.roster||[]).forEach(d=>{
+      [d.teacherName, d.teacherName2].filter(Boolean).forEach(name=>{
+        name = name.trim();
+        if(name && !existingNames.has(name.toUpperCase())){
+          teachers.push({
+            id:'tch_'+Date.now()+'_'+Math.random().toString(36).slice(2,5),
+            name, shortName:'', phone:'', subject:'', classes:''
+          });
+          existingNames.add(name.toUpperCase());
+          added++;
+        }
+      });
+    });
+  });
+  if(!added){ showAlert('No new teachers found in roster.','info'); return; }
+  await DB.set('teachers', teachers);
+  showAlert(`✅ ${added} new teachers imported!`,'success');
+  renderTeachers(document.getElementById('mainContent'));
+}
+
+async function tchExport() {
+  const teachers = await DB.get('teachers').catch(()=>[]);
+  if(!teachers.length){ showAlert('No teachers to export.','warning'); return; }
+  const ws = XLSX.utils.json_to_sheet(teachers.map((t,i)=>({
+    'SL': i+1, 'Name': t.name, 'Short Name': t.shortName||'',
+    'Subject': t.subject||'', 'Classes': t.classes||'', 'Phone': t.phone||''
+  })));
+  ws['!cols']=[{wch:4},{wch:28},{wch:12},{wch:24},{wch:16},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Teachers');
+  XLSX.writeFile(wb, 'RHS_Teachers.xlsx');
+  showAlert('✅ Exported!','success');
+}
+
+// ── TIMETABLE SEED — 1st Summative Evaluation 2026 (from PDF) ────────────────
+const RHS_TIMETABLE_2026 = [
+  // ── Class V — 11:00–11:40 ──
+  {cls:'V',   subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–11:40'},
+  {cls:'V',   subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–11:40'},
+  {cls:'V',   subj:'Poribesh o Porichoy',date:'04-04-2026',day:'Saturday', sess:'1st Half',time:'11:00–11:40'},
+  {cls:'V',   subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–11:40'},
+  // ── Class VI — 11:00–12:15 ──
+  {cls:'VI',  subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VI',  subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VI',  subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VI',  subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VI',  subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VI',  subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
+  // ── Class VII — 11:00–12:15 ──
+  {cls:'VII', subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VII', subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VII', subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VII', subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VII', subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VII', subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VII', subj:'Sanskrit',           date:'10-04-2026',day:'Friday',   sess:'1st Half',time:'11:00–12:15'},
+  // ── Class VIII — 11:00–12:15 ──
+  {cls:'VIII',subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VIII',subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VIII',subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VIII',subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VIII',subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VIII',subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
+  {cls:'VIII',subj:'Sanskrit',           date:'10-04-2026',day:'Friday',   sess:'1st Half',time:'11:00–12:15'},
+  // ── Class IX — 1:00–2:30 ──
+  {cls:'IX',  subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'IX',  subj:'English',            date:'02-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'IX',  subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'IX',  subj:'Physical Science',   date:'07-04-2026',day:'Tuesday',  sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'IX',  subj:'Life Science',       date:'08-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'IX',  subj:'History',            date:'09-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'IX',  subj:'Geography',          date:'10-04-2026',day:'Friday',   sess:'2nd Half',time:'1:00–2:30'},
+  // ── Class X — 1:00–2:30 ──
+  {cls:'X',   subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'X',   subj:'English',            date:'02-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'X',   subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'X',   subj:'Physical Science',   date:'07-04-2026',day:'Tuesday',  sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'X',   subj:'Life Science',       date:'08-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'X',   subj:'History',            date:'09-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
+  {cls:'X',   subj:'Geography',          date:'10-04-2026',day:'Friday',   sess:'2nd Half',time:'1:00–2:30'},
+];
+
+async function edSeedTimetable() {
+  const btn = document.getElementById('ed-seed-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Saving...'; }
+
+  try {
+    // Get or create exam
+    let exams = await DB.get('exams').catch(()=>[]);
+    let exam  = exams.find(e=>(e.name||'').includes('1st Summative')&&(e.year||'').includes('2026'));
+
+    if(!exam) {
+      exam = { id:'rhs_1st_summative_2026', name:'1st Summative Evaluation',
+               year:'2026', status:'Completed', createdOn:new Date().toISOString() };
+      exams = [...exams.filter(e=>e.id!==exam.id), exam];
+      await DB.set('exams', exams);
+    }
+
+    // Build timetable entries
+    const tt = RHS_TIMETABLE_2026.map((r,i) => ({
+      id:   `${exam.id}_${r.cls}_${r.date}_${r.subj}`.replace(/\s+/g,'_'),
+      examId:    exam.id,
+      examName:  exam.name + ' — ' + exam.year,
+      date:      r.date,
+      day:       r.day,
+      subject:   r.subj,
+      className: r.cls,
+      session:   r.sess,
+      time:      r.time,
+    }));
+
+    // Remove old entries for this exam, add new
+    const existing = await DB.get('examTimetables').catch(()=>[]);
+    const filtered = existing.filter(t=>t.examId!==exam.id);
+    await DB.set('examTimetables', [...filtered, ...tt]);
+
+    showAlert(`✅ ${tt.length} timetable entries saved! Exam: "${exam.name} ${exam.year}"`, 'success');
+    if(btn){ btn.textContent='✅ Saved!'; }
+
+    // Refresh exam docs page
+    setTimeout(()=> renderExamDocs(document.getElementById('mainContent')), 1000);
+
+  } catch(err) {
+    showAlert('Error: '+err.message, 'error');
+    if(btn){ btn.disabled=false; btn.textContent='📅 Seed Timetable to EMS'; }
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  EXAM DOCUMENTS — Print System
 //  Upload Master Excel → Parse → Save to MongoDB → Print beautiful A4 docs
@@ -5310,8 +5654,19 @@ async function renderExamDocs(el) {
     <div class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b">
       <div class="card-title">📥 Step 1 — Excel থেকে EMS-এ Import করুন</div>
       <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
-        RHS_Master_Complete.xlsx upload করুন → সব data EMS MongoDB-তে save হবে → তারপর যেকোনো exam print করুন
+        RHS_Master_Complete.xlsx upload করুন → সব data EMS MongoDB-তে save হবে
       </p>
+
+      <!-- Quick Seed from PDF -->
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:12px;font-weight:600;color:#1e40af;margin-bottom:2px">⚡ Quick — 1st Summative 2026 Timetable</div>
+          <div style="font-size:11px;color:#3b82f6">PDF থেকে exact timetable (Class V–X) এক click-এ EMS-এ save করুন</div>
+        </div>
+        <button id="ed-seed-btn" class="btn btn-primary" onclick="edSeedTimetable()" style="white-space:nowrap;background:#2563eb">
+          📅 Seed Timetable to EMS
+        </button>
+      </div>
       <div id="ed-upload-zone"
         style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px"
         ondragover="event.preventDefault();this.style.borderColor='#f59e0b'"
