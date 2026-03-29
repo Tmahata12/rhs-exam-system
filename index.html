@@ -771,70 +771,224 @@ function modalWrap(title, html, onClose='') {
 
 // ── DASHBOARD ───────────────────────────────────────────────────────────────
 async function renderDashboard(el) {
-    const [exams, students, halls, teachers] = await Promise.all([
-        DB.get('exams'), DB.get('students'), DB.get('halls'), DB.get('teachers')
+    const [exams, students, halls, teachers, tts, seatingPlans, rosters] = await Promise.all([
+        DB.get('exams'), DB.get('students'), DB.get('halls'), DB.get('teachers'),
+        DB.get('examTimetables'), DB.get('seatingPlans'), DB.get('invigilatorRosters')
     ]);
-    const today = new Date().toISOString().split('T')[0];
-    const upcoming = exams.filter(e=>e.startDate>today).length;
-    const ongoing  = exams.filter(e=>e.startDate<=today&&e.endDate>=today).length;
+
+    // Today info
+    const now = new Date();
+    const todayStr = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
+    const todayISO = now.toISOString().split('T')[0];
+
+    // Today's timetable entries
+    const todayTT = tts.filter(t => {
+        const d = t.date||'';
+        return d === todayStr || d === todayISO ||
+               d.replace(/(\d{2})-(\d{2})-(\d{4})/,'$3-$2-$1') === todayISO;
+    });
+
+    // Upcoming exam — nearest exam from timetable
+    const allDates = [...new Set(tts.map(t=>t.date))].sort();
+    const futureDates = allDates.filter(d => {
+        const norm = d.includes('-') && d.length===10 ?
+            (d.match(/^\d{4}/) ? d : d.replace(/(\d{2})-(\d{2})-(\d{4})/,'$3-$2-$1')) : '';
+        return norm >= todayISO;
+    });
+    const nextDateRaw = futureDates[0];
+    const nextEntries = nextDateRaw ? tts.filter(t=>t.date===nextDateRaw) : [];
+    const nextExamName = nextEntries.length ? (exams.find(e=>String(e.id)===String(nextEntries[0]?.examId))?.name||'Upcoming Exam') : null;
+
+    // Countdown
+    let countdownHTML = '';
+    if(nextDateRaw) {
+        const norm = nextDateRaw.match(/^\d{4}/) ? nextDateRaw :
+            nextDateRaw.replace(/(\d{2})-(\d{2})-(\d{4})/,'$3-$2-$1');
+        const diff = Math.ceil((new Date(norm) - now) / 86400000);
+        if(diff === 0) countdownHTML = `<span style="color:#059669;font-weight:700">📅 TODAY!</span>`;
+        else if(diff > 0) countdownHTML = `<span style="color:#2563eb;font-weight:700">${diff} days to go</span>`;
+        else countdownHTML = `<span style="color:#64748B">Completed</span>`;
+    }
+
+    // Stats
+    const totalStudents = students.length;
+    const totalTeachers = teachers.length;
+    const totalHalls = halls.length;
+    const totalSeating = seatingPlans.length;
+    const totalRosters = rosters.length;
+
+    // Pending tasks
+    const pending = [];
+    if(!tts.length) pending.push({icon:'📅', text:'No timetable entries yet', page:'timetable'});
+    if(!students.length) pending.push({icon:'👨‍🎓', text:'No students imported', page:'students'});
+    if(!teachers.length) pending.push({icon:'👩‍🏫', text:'No teachers added', page:'teachers'});
+    if(!seatingPlans.length) pending.push({icon:'🪑', text:'No seating plan generated', page:'seating'});
+    if(!rosters.length) pending.push({icon:'👮', text:'No invigilator roster generated', page:'invigilator'});
 
     el.innerHTML = `
-    <div class="page-title">📊 Dashboard</div>
-    <div class="stats-row">
-      <div class="stat-card stat-blue"><h2>${exams.length}</h2><p>Total Exams</p></div>
-      <div class="stat-card stat-orange"><h2>${upcoming}</h2><p>Upcoming</p></div>
-      <div class="stat-card stat-green"><h2>${ongoing}</h2><p>Ongoing</p></div>
-      <div class="stat-card stat-purple"><h2>${students.length}</h2><p>Students</p></div>
+    <div class="page-title">📊 Dashboard
+      <span style="font-size:12px;font-weight:400;color:var(--text-2);margin-left:8px">${now.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</span>
     </div>
-    <div class="card">
-      <div class="card-title">⚡ Quick Actions</div>
-      <div class="tool-grid">
-        <div class="tool-card" onclick="showPage('exams')">
-          <div class="tool-icon">📋</div>
-          <div class="tool-name">Manage Exams</div>
-          <div class="tool-desc">Create & edit exam schedules</div>
+
+    <!-- Stats Row -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px;padding:0 24px">
+      ${[
+        ['📋', exams.length, 'Exams', '#2563eb', '#eff6ff'],
+        ['👨‍🎓', totalStudents, 'Students', '#059669', '#f0fdf4'],
+        ['👩‍🏫', totalTeachers, 'Teachers', '#7c3aed', '#f5f3ff'],
+        ['🏫', totalHalls, 'Halls', '#d97706', '#fffbeb'],
+        ['🪑', totalSeating, 'Seating Plans', '#0891b2', '#ecfeff'],
+        ['👮', totalRosters, 'Rosters', '#dc2626', '#fef2f2'],
+      ].map(([icon,val,label,color,bg])=>`
+        <div style="background:${bg};border-radius:12px;padding:14px 16px;border:1px solid ${color}22">
+          <div style="font-size:22px;margin-bottom:4px">${icon}</div>
+          <div style="font-size:22px;font-weight:800;color:${color};line-height:1">${val}</div>
+          <div style="font-size:11px;color:#64748B;margin-top:3px">${label}</div>
+        </div>`).join('')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 24px;margin-bottom:16px">
+
+      <!-- Today's Schedule -->
+      <div class="card" style="margin:0">
+        <div class="card-title">📅 Today's Schedule
+          <small style="font-size:11px;color:var(--text-2);font-weight:400"> — ${todayStr}</small>
         </div>
-        <div class="tool-card" onclick="showPage('seating')">
-          <div class="tool-icon">🪑</div>
-          <div class="tool-name">Seating Plan</div>
-          <div class="tool-desc">Generate hall seating</div>
-        </div>
-        <div class="tool-card" onclick="showPage('invigilator')">
-          <div class="tool-icon">👮</div>
-          <div class="tool-name">Duty Roster</div>
-          <div class="tool-desc">Assign invigilators</div>
-        </div>
-        <div class="tool-card" onclick="showPage('admitcards')">
-          <div class="tool-icon">🎫</div>
-          <div class="tool-name">Admit Cards</div>
-          <div class="tool-desc">Generate & print</div>
-        </div>
-        <div class="tool-card" onclick="showPage('marks')">
-          <div class="tool-icon">📝</div>
-          <div class="tool-name">Marks Entry</div>
-          <div class="tool-desc">Enter student marks</div>
-        </div>
-        <div class="tool-card" onclick="showPage('autoassign')">
-          <div class="tool-icon">⚡</div>
-          <div class="tool-name">Auto-Assign</div>
-          <div class="tool-desc">One-click everything</div>
+        ${todayTT.length ? `
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${todayTT.map(t=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-radius:8px;border-left:3px solid ${t.session?.includes('2nd')?'#f59e0b':'#2563eb'}">
+            <div style="font-size:18px">${t.session?.includes('2nd')?'🌤️':'🌅'}</div>
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:700;color:var(--text)">${t.subject||'—'}</div>
+              <div style="font-size:11px;color:var(--text-2)">Class ${t.className||'—'} · ${t.time||t.session||'—'}</div>
+            </div>
+            <span class="badge ${t.session?.includes('2nd')?'badge-orange':'badge-blue'}" style="font-size:10px">${t.session?.includes('2nd')?'2nd Half':'1st Half'}</span>
+          </div>`).join('')}
+        </div>` : `
+        <div style="text-align:center;padding:24px;color:var(--text-2)">
+          <div style="font-size:32px;margin-bottom:8px">🏖️</div>
+          <div style="font-size:13px">No exam scheduled today</div>
+        </div>`}
+      </div>
+
+      <!-- Upcoming Exam Countdown -->
+      <div class="card" style="margin:0">
+        <div class="card-title">⏳ Next Exam</div>
+        ${nextDateRaw ? `
+        <div style="text-align:center;padding:16px 8px">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">${nextExamName}</div>
+          <div style="font-size:36px;font-weight:800;color:#2563eb;line-height:1;margin-bottom:6px">
+            ${(()=>{
+              const norm=nextDateRaw.match(/^\d{4}/)?nextDateRaw:nextDateRaw.replace(/(\d{2})-(\d{2})-(\d{4})/,'$3-$2-$1');
+              const diff=Math.ceil((new Date(norm)-now)/86400000);
+              return diff===0?'TODAY!':diff>0?diff:'Done';
+            })()}
+          </div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">${countdownHTML} · ${nextDateRaw}</div>
+          <div style="display:flex;flex-direction:column;gap:5px;text-align:left">
+            ${nextEntries.slice(0,4).map(e=>`
+            <div style="display:flex;justify-content:space-between;padding:5px 10px;background:var(--bg);border-radius:6px;font-size:12px">
+              <span style="font-weight:600;color:var(--text)">${e.subject||'—'}</span>
+              <span style="color:var(--text-2)">Class ${e.className||'—'}</span>
+            </div>`).join('')}
+            ${nextEntries.length>4?`<div style="font-size:11px;color:var(--text-2);text-align:center">+${nextEntries.length-4} more</div>`:''}
+          </div>
+        </div>` : `
+        <div style="text-align:center;padding:24px;color:var(--text-2)">
+          <div style="font-size:32px;margin-bottom:8px">📅</div>
+          <div style="font-size:13px">Add timetable entries to see countdown</div>
+          <button class="btn btn-primary btn-sm" onclick="showPage('timetable')" style="margin-top:10px">Go to Timetable</button>
+        </div>`}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 24px;margin-bottom:16px">
+
+      <!-- Pending Tasks -->
+      <div class="card" style="margin:0">
+        <div class="card-title">✅ Setup Checklist</div>
+        ${pending.length===0 ? `
+        <div style="text-align:center;padding:16px;color:#059669">
+          <div style="font-size:28px;margin-bottom:6px">🎉</div>
+          <div style="font-size:13px;font-weight:600">সব setup complete!</div>
+        </div>` : `
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${pending.map(p=>`
+          <div onclick="showPage('${p.page}')" style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fef2f2;border-radius:8px;border-left:3px solid #dc2626;cursor:pointer;transition:all .15s" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='#fef2f2'">
+            <span style="font-size:16px">${p.icon}</span>
+            <span style="font-size:12px;color:#991b1b;font-weight:500">${p.text}</span>
+            <span style="margin-left:auto;font-size:10px;color:#dc2626">→</span>
+          </div>`).join('')}
+          ${[
+            {ok:!!tts.length, icon:'📅', text:'Timetable added', page:'timetable'},
+            {ok:!!students.length, icon:'👨‍🎓', text:'Students imported', page:'students'},
+            {ok:!!teachers.length, icon:'👩‍🏫', text:'Teachers added', page:'teachers'},
+            {ok:!!seatingPlans.length, icon:'🪑', text:'Seating plan ready', page:'seating'},
+            {ok:!!rosters.length, icon:'👮', text:'Duty roster ready', page:'invigilator'},
+          ].filter(i=>i.ok).map(p=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f0fdf4;border-radius:8px;border-left:3px solid #059669">
+            <span style="font-size:16px">${p.icon}</span>
+            <span style="font-size:12px;color:#065f46;font-weight:500">${p.text}</span>
+            <span style="margin-left:auto;font-size:12px;color:#059669">✓</span>
+          </div>`).join('')}
+        </div>`}
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="card" style="margin:0">
+        <div class="card-title">⚡ Quick Actions</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          ${[
+            ['📅','Timetable','timetable'],
+            ['🪑','Seating Plan','seating'],
+            ['👮','Duty Roster','invigilator'],
+            ['🖨️','Exam Docs','examdocs'],
+            ['👨‍🎓','Students','students'],
+            ['👩‍🏫','Teachers','teachers'],
+            ['📝','Marks Entry','marks'],
+            ['⚡','Auto-Assign','autoassign'],
+            ['📊','Analysis','analysis'],
+            ['🎫','Admit Cards','admitcards'],
+          ].map(([icon,label,page])=>`
+          <div onclick="showPage('${page}')" style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:all .15s;font-size:12px;font-weight:500;color:var(--text)"
+            onmouseover="this.style.borderColor='#2563eb';this.style.color='#2563eb'"
+            onmouseout="this.style.borderColor='';this.style.color=''">
+            <span style="font-size:16px">${icon}</span>${label}
+          </div>`).join('')}
         </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">📋 Recent Exams</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Exam Name</th><th>Type</th><th>Start Date</th><th>End Date</th><th>Status</th></tr></thead>
-        <tbody>${exams.length ? exams.slice(-5).reverse().map(e=>`
-          <tr>
-            <td><strong>${e.name}</strong></td>
-            <td>${e.type||'—'}</td>
-            <td>${fmt(e.startDate)}</td>
-            <td>${fmt(e.endDate)}</td>
-            <td>${statusBadge(e.status)}</td>
-          </tr>`).join('') : emptyRow(5,'No exams yet — create your first exam!')}
-        </tbody>
-      </table></div>
+
+    <!-- Recent Activity -->
+    <div style="padding:0 24px 24px">
+      <div class="card" style="margin:0">
+        <div class="card-title">📋 Exams Overview</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Exam</th><th>Year</th><th>Students</th><th>Timetable</th><th>Seating</th><th>Roster</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>${exams.length ? exams.slice().reverse().map(e=>{
+            const ttCount = tts.filter(t=>String(t.examId)===String(e.id)).length;
+            const hasSP = seatingPlans.some(p=>String(p.examId)===String(e.id));
+            const hasIR = rosters.some(r=>String(r.examId)===String(e.id));
+            return `<tr>
+              <td><strong>${e.name}</strong></td>
+              <td>${e.year||'—'}</td>
+              <td style="text-align:center">${totalStudents||'—'}</td>
+              <td style="text-align:center">${ttCount?`<span style="color:#059669;font-weight:600">✓ ${ttCount}</span>`:'<span style="color:#dc2626">✗</span>'}</td>
+              <td style="text-align:center">${hasSP?'<span style="color:#059669;font-weight:600">✓</span>':'<span style="color:#dc2626">✗</span>'}</td>
+              <td style="text-align:center">${hasIR?'<span style="color:#059669;font-weight:600">✓</span>':'<span style="color:#dc2626">✗</span>'}</td>
+              <td>${statusBadge(e.status||'Upcoming')}</td>
+              <td>
+                <div class="btn-group">
+                  <button class="btn btn-primary btn-sm" onclick="showPage('examdocs')">🖨️</button>
+                  <button class="btn btn-info btn-sm" onclick="showPage('timetable');window._selectedExam='${e.id}'">📅</button>
+                </div>
+              </td>
+            </tr>`;
+          }).join('') : emptyRow(8,'No exams yet.')}
+          </tbody>
+        </table></div>
+      </div>
     </div>`;
 }
 
@@ -2626,131 +2780,268 @@ async function bulkUploadStudents(event) {
 
 // ── ADMIT CARDS ───────────────────────────────────────────────────────────────
 async function renderAdmitCards(el) {
-    const [exams, classes] = await Promise.all([DB.get('exams'), DB.get('classes')]);
-    const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
-    const clsOpts  = ['<option value="">All Classes</option>',
-        ...classes.map(c=>`<option value="${c.name||c.className}">${c.name||c.className}</option>`)].join('');
+    const [exams, settings] = await Promise.all([DB.get('exams'), DB.getObj('settings')]);
+    const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+    const classes = ['V','VI','VII','VIII','IX','X'];
+    const clsOpts = ['<option value="">All Classes</option>', ...classes.map(c=>`<option value="${c}">Class ${c}</option>`)].join('');
+
     el.innerHTML = `
     <div class="page-title">🎫 Admit Card Generator</div>
-    <div class="card">
-      <div class="card-title">⚙️ Configuration</div>
-      <div class="form-row">
-        <div class="form-group"><label>Select Exam *</label>
-          <select id="acExam"><option value="">--Select--</option>${examOpts}</select>
+    <div style="padding:0 24px 24px">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">⚙️ Configuration</div>
+        <div class="form-row">
+          <div class="form-group"><label>Exam *</label>
+            <select id="acExam"><option value="">--Select--</option>${examOpts}</select>
+          </div>
+          <div class="form-group"><label>Class Filter</label>
+            <select id="acClass">${clsOpts}</select>
+          </div>
+          <div class="form-group"><label>Section Filter</label>
+            <select id="acSection">
+              <option value="">All</option>
+              <option value="A">Section A (Boys)</option>
+              <option value="B">Section B (Girls)</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group"><label>Filter by Class</label>
-          <select id="acClass">${clsOpts}</select>
+        <div class="form-row">
+          <div class="form-group"><label>Design Theme</label>
+            <select id="acTheme">
+              <option value="official">Official (Navy Blue)</option>
+              <option value="green">Green & Gold</option>
+              <option value="simple">Simple (B&W)</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Cards per Page</label>
+            <select id="acPerPage">
+              <option value="1">1 per page (full size)</option>
+              <option value="2" selected>2 per page</option>
+              <option value="4">4 per page (compact)</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Show Photo Box</label>
+            <select id="acPhoto">
+              <option value="yes" selected>Yes</option>
+              <option value="no">No</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group"><label>Filter by Section</label>
-          <input id="acSection" placeholder="A or leave blank">
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#1e40af">
+          <strong>✅ Admit Card includes:</strong> School header, Exam name, Student details (Name, Roll, Class, Section), Complete timetable (date, session, time, subject, marks), Instructions, Signature lines
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="generateAdmitCardsEMS()">🎫 Generate & Print</button>
+          <button class="btn btn-success" onclick="generateAdmitCardsEMS('preview')">👁️ Preview First</button>
+          <button class="btn btn-warning" onclick="acCountStudents()">👨‍🎓 Count Students</button>
+        </div>
+        <div id="ac-count" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+      </div>
+
+      <!-- School Settings reminder -->
+      <div class="card" style="border-left:4px solid #f59e0b">
+        <div class="card-title" style="color:#92400e">🏫 School Info (Settings থেকে নেওয়া হবে)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px">
+          <div><span style="color:var(--text-2)">School Name:</span> <strong>${settings.schoolName||'Ramnagar High School (H.S.)'}</strong></div>
+          <div><span style="color:var(--text-2)">DISE Code:</span> <strong>${settings.schoolCode||'19250206103'}</strong></div>
+          <div><span style="color:var(--text-2)">Academic Year:</span> <strong>${settings.academicYear||'2025-26'}</strong></div>
         </div>
       </div>
-      <div style="background:#e8f5e9;padding:14px;border-radius:8px;margin-bottom:16px;border-left:4px solid var(--success);font-size:13px;">
-        ✅ <strong>Admit Card includes:</strong> School name, Exam name, Student details (Name, Roll, Class, Section, Father/Mother),
-        Complete exam timetable (date, session, time, subject, marks), Photo space, Instructions, Principal signature line
-      </div>
-      <button class="btn btn-primary" onclick="generateAdmitCardsEMS()">🎫 Generate & Print Admit Cards</button>
     </div>`;
 }
 
-async function generateAdmitCardsEMS() {
+async function acCountStudents() {
+    const examId = document.getElementById('acExam').value;
+    const cls = document.getElementById('acClass').value;
+    const sec = document.getElementById('acSection').value;
+    const students = await DB.get('students');
+    let filtered = students;
+    if(cls) filtered = filtered.filter(s=>(s.class||s.classId||'')===cls||(s.class||s.classId||'').includes(cls));
+    if(sec) filtered = filtered.filter(s=>(s.section||'').toUpperCase()===sec);
+    const el = document.getElementById('ac-count');
+    if(el) el.innerHTML = `📊 <strong>${filtered.length}</strong> students will get admit cards${cls?' for Class '+cls:''}${sec?' Section '+sec:''}`;
+}
+
+async function generateAdmitCardsEMS(mode='print') {
     const examId      = document.getElementById('acExam').value;
     const classFilter = document.getElementById('acClass').value;
-    const secFilter   = document.getElementById('acSection').value.trim().toUpperCase();
+    const secFilter   = document.getElementById('acSection').value.toUpperCase();
+    const theme       = document.getElementById('acTheme').value;
+    const perPage     = parseInt(document.getElementById('acPerPage').value)||2;
+    const showPhoto   = document.getElementById('acPhoto').value === 'yes';
+
     if(!examId){showAlert('Select an Exam.','error');return;}
-    const [exams,students,timetables,settings]=await Promise.all([
-        DB.get('exams'),DB.get('students'),DB.get('examTimetables'),DB.getObj('settings')]);
-    const exam=exams.find(e=>String(e.id)===String(examId));
+
+    const [exams,students,timetables,settings] = await Promise.all([
+        DB.get('exams'),DB.get('students'),DB.get('examTimetables'),DB.getObj('settings')
+    ]);
+
+    const exam = exams.find(e=>String(e.id)===String(examId));
     if(!exam){showAlert('Exam not found.','error');return;}
-    let filtered=students;
-    if(classFilter) filtered=filtered.filter(s=>(s.class||s.classId||'')===classFilter);
-    if(secFilter)   filtered=filtered.filter(s=>(s.section||'').toUpperCase()===secFilter);
-    if(!filtered.length){showAlert('No students match the filter.','error');return;}
-    const examTT=timetables.filter(t=>String(t.examId)===String(examId))
-        .sort((a,b)=>a.date.localeCompare(b.date));
-    const schoolName=settings.schoolName||'Ramnagar High School (H.S.)';
-    const schoolCode=settings.schoolCode||'';
-    const acYear=settings.academicYear||exam.year||'2025-26';
 
-    const ttRows=examTT.map(t=>`<tr>
-      <td>${fmt(t.date)}</td><td><span style="font-weight:600;color:#1565c0;">${t.session||'—'}</span></td>
-      <td>${fmtTime(t.startTime)}</td><td><strong>${t.subject||'—'}</strong></td>
-      <td>${t.className||'—'}</td><td>${t.duration||'—'} min</td><td>${t.maxMarks||100}</td>
-    </tr>`).join('');
-    const ttTable=examTT.length?`<table style="width:100%;border-collapse:collapse;font-size:11px;">
-      <thead><tr style="background:#1e3c72;color:#fff;">
-        <th style="padding:6px 8px;">Date</th><th style="padding:6px 8px;">Session</th>
-        <th style="padding:6px 8px;">Time</th><th style="padding:6px 8px;">Subject</th>
-        <th style="padding:6px 8px;">Class</th><th style="padding:6px 8px;">Duration</th><th style="padding:6px 8px;">Marks</th>
-      </tr></thead><tbody>${ttRows}</tbody></table>`:'<p style="color:#888;font-size:12px;">Timetable not created yet.</p>';
+    let filtered = students;
+    if(classFilter) filtered = filtered.filter(s=>{
+        const sc = s.class||s.classId||'';
+        return sc===classFilter || sc===`Class ${classFilter}` || sc.replace('Class ','')===classFilter;
+    });
+    if(secFilter) filtered = filtered.filter(s=>(s.section||'').toUpperCase()===secFilter);
+    filtered.sort((a,b)=>String(a.roll).localeCompare(String(b.roll),undefined,{numeric:true}));
 
-    const cards=filtered.map(s=>`
-    <div style="border:2px solid #1e3c72;border-radius:10px;padding:20px;margin:0 auto 30px;max-width:750px;page-break-after:always;font-family:Arial,sans-serif;">
-      <!-- Header -->
-      <div style="display:flex;align-items:center;gap:14px;border-bottom:2px solid #1e3c72;padding-bottom:14px;margin-bottom:14px;">
-        <div style="font-size:40px;">🏫</div>
-        <div style="flex:1;">
-          <div style="font-size:18px;font-weight:700;color:#1e3c72;">${schoolName}</div>
-          ${schoolCode?`<div style="font-size:12px;color:#555;">DISE Code: ${schoolCode}</div>`:''}
-          <div style="font-size:12px;color:#555;">Academic Year: ${acYear}</div>
-        </div>
-        <div style="background:#1e3c72;color:#fff;padding:8px 14px;border-radius:6px;font-weight:700;font-size:13px;">ADMIT CARD</div>
-      </div>
-      <!-- Exam -->
-      <div style="background:#e3f2fd;padding:8px 14px;border-left:4px solid #2196F3;font-weight:700;font-size:14px;color:#1e3c72;margin-bottom:14px;border-radius:0 6px 6px 0;">
-        ${exam.name} — ${exam.type||''}
-      </div>
-      <!-- Student + Photo -->
-      <div style="display:flex;gap:16px;margin-bottom:14px;">
-        <div style="flex:1;">
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <tr><td style="color:#666;width:40%;font-size:12px;padding:4px 6px;">Student Name</td><td style="padding:4px 6px;">: <strong>${s.name||'—'}</strong></td></tr>
-            <tr><td style="color:#666;font-size:12px;padding:4px 6px;">Roll Number</td><td style="padding:4px 6px;">: <strong>${s.roll||'—'}</strong></td></tr>
-            <tr><td style="color:#666;font-size:12px;padding:4px 6px;">Class</td><td style="padding:4px 6px;">: ${s.class||s.classId||'—'}${s.section?' — Section '+s.section:''}</td></tr>
-            <tr><td style="color:#666;font-size:12px;padding:4px 6px;">Father's Name</td><td style="padding:4px 6px;">: ${s.father||s.fatherName||'—'}</td></tr>
-            <tr><td style="color:#666;font-size:12px;padding:4px 6px;">Mother's Name</td><td style="padding:4px 6px;">: ${s.mother||s.motherName||'—'}</td></tr>
-            <tr><td style="color:#666;font-size:12px;padding:4px 6px;">Date of Birth</td><td style="padding:4px 6px;">: ${s.dob?fmt(s.dob):'—'}</td></tr>
-          </table>
-        </div>
-        <div style="width:90px;height:110px;border:2px dashed #aaa;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-          <div style="text-align:center;color:#ccc;font-size:11px;line-height:1.6;">Paste<br>Photo</div>
-        </div>
-      </div>
-      <!-- Timetable -->
-      <div style="font-weight:700;font-size:13px;color:#1e3c72;margin-bottom:8px;">📅 Exam Schedule</div>
-      ${ttTable}
-      <!-- Instructions -->
-      <div style="background:#fff9e6;border:1px solid #ffe082;border-radius:6px;padding:10px 14px;margin:12px 0;">
-        <strong style="font-size:13px;color:#b8860b;display:block;margin-bottom:4px;">📌 Exam Instructions:</strong>
-        <ol style="margin-left:18px;font-size:12px;color:#444;line-height:1.9;">
-          <li>Enter the examination hall 15 minutes before the exam starts.</li>
-          <li>This Admit Card must be brought to the examination.</li>
-          <li>Mobile phones and electronic devices are strictly prohibited.</li>
-          <li>Use of unfair means will result in cancellation of the examination.</li>
-        </ol>
-      </div>
-      <!-- Signature -->
-      <div style="display:flex;justify-content:space-between;margin-top:8px;">
-        <div style="text-align:center;width:45%;">
-          <div style="border-top:1px solid #333;padding-top:5px;font-size:12px;color:#555;margin-top:40px;">Student's Signature</div>
-        </div>
-        <div style="text-align:right;width:45%;">
-          <div style="border-top:1px solid #333;padding-top:5px;font-size:12px;color:#555;margin-top:40px;">Principal / Headmaster<br><small>${schoolName}</small></div>
-        </div>
-      </div>
-    </div>`).join('');
+    if(!filtered.length){showAlert('No students found. Check filter or import students first.','error');return;}
 
-    showAlert(`✅ Generating ${filtered.length} admit card(s)...`,'success');
-    const loadEl = document.createElement('div');
-    loadEl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:99999;display:flex;align-items:center;justify-content:center;';
-    loadEl.innerHTML='<div style="background:#fff;border-radius:12px;padding:24px;text-align:center;"><div style="font-size:32px;margin-bottom:10px;">🎫</div><div style="font-weight:600;color:var(--primary)">Generating admit cards...</div></div>';
-    document.body.appendChild(loadEl);
-    setTimeout(()=>loadEl.remove(), 1500);
-    const w=window.open('','_blank');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Admit Cards — ${exam.name}</title>
-    <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;background:#eee;padding:20px;}
-    @media print{body{background:#fff;padding:0;}}</style></head><body>${cards}
-    <script>window.onload=()=>window.print();<\/script></body></html>`);
+    const examTT = timetables.filter(t=>String(t.examId)===String(examId))
+        .sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.className).localeCompare(String(b.className)));
+
+    const school    = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+    const dise      = settings.schoolCode||'19250206103';
+    const hsCode    = settings.hsCode||'04178';
+    const phone     = settings.phone||'(03452) 252271';
+    const address   = settings.address||'P.O.- Uttar Ramnagar, P.S.: Aushgram, Dist.: Purba Bardhaman';
+    const acYear    = settings.academicYear||exam.year||'2025-26';
+    const principal = settings.principalName||'Dasarath Bagdi';
+
+    // Theme colors
+    const themes = {
+        official: {h:'#1B3A6B', h2:'#2C4F8C', accent:'#C9A84C', bg:'#DCE9F8', light:'#F4F8FF'},
+        green:    {h:'#065f46', h2:'#047857', accent:'#d97706', bg:'#d1fae5', light:'#f0fdf4'},
+        simple:   {h:'#1f2937', h2:'#374151', accent:'#6b7280', bg:'#f3f4f6', light:'#f9fafb'},
+    };
+    const tc = themes[theme]||themes.official;
+
+    // Build timetable — group by class for this student
+    const buildTT = (studentClass) => {
+        const rows = examTT.filter(t=>{
+            const tc2 = t.className||'';
+            return !tc2 || tc2===studentClass || tc2===`Class ${studentClass}` || tc2.replace('Class ','')===studentClass;
+        });
+        if(!rows.length) return examTT; // fallback: show all
+        return rows;
+    };
+
+    const cardHtml = (s) => {
+        const cls = s.class||s.classId||'—';
+        const ttRows = buildTT(cls);
+        const ttHtml = ttRows.map((t,i)=>`
+          <tr style="background:${i%2===0?tc.light:'#fff'}">
+            <td style="padding:5px 8px;border:1px solid #ddd;font-weight:600;color:${tc.h}">${t.date||'—'}</td>
+            <td style="padding:5px 8px;border:1px solid #ddd">${t.day||'—'}</td>
+            <td style="padding:5px 8px;border:1px solid #ddd"><span style="background:${t.session?.includes('2nd')?'#fef3c7':'#dbeafe'};padding:1px 6px;border-radius:99px;font-size:10px;font-weight:600">${t.session||'—'}</span></td>
+            <td style="padding:5px 8px;border:1px solid #ddd;color:${t.session?.includes('2nd')?'#92400e':'#1e40af'}">${t.time||t.startTime||'—'}</td>
+            <td style="padding:5px 8px;border:1px solid #ddd;font-weight:700">${t.subject||'—'}</td>
+            <td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${t.maxMarks||'—'}</td>
+          </tr>`).join('');
+
+        return `<div style="border:2px solid ${tc.h};border-radius:10px;padding:0;margin:0 auto;max-width:720px;font-family:Arial,sans-serif;overflow:hidden;page-break-inside:avoid">
+          <!-- Header -->
+          <div style="background:${tc.h};color:white;padding:12px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div style="flex:1">
+                <div style="font-size:16px;font-weight:700;letter-spacing:0.5px">${school}</div>
+                <div style="font-size:10px;opacity:0.8;margin-top:2px">DISE: ${dise} | H.S. Code: ${hsCode} | Ph: ${phone}</div>
+                <div style="font-size:10px;opacity:0.75;margin-top:1px">${address}</div>
+              </div>
+              <div style="background:${tc.accent};color:${tc.h};padding:6px 14px;border-radius:6px;font-weight:800;font-size:13px;white-space:nowrap">
+                ADMIT CARD
+              </div>
+            </div>
+          </div>
+          <!-- Gold line -->
+          <div style="height:3px;background:${tc.accent}"></div>
+          <!-- Exam name -->
+          <div style="background:${tc.bg};padding:7px 16px;font-weight:700;font-size:13px;color:${tc.h};border-bottom:1px solid ${tc.accent}44">
+            ${exam.name}${exam.year?' — '+exam.year:''} &nbsp;|&nbsp; Academic Year: ${acYear}
+          </div>
+          <!-- Student Info + Photo -->
+          <div style="display:flex;gap:0;padding:12px 16px;border-bottom:1px solid #e5e7eb">
+            <div style="flex:1">
+              <table style="font-size:12px;border-collapse:collapse;width:100%">
+                <tr><td style="color:#64748B;padding:3px 0;width:36%">Student Name</td><td style="padding:3px 6px;font-weight:700;font-size:13px;color:${tc.h}">: ${s.name||'—'}</td></tr>
+                <tr><td style="color:#64748B;padding:3px 0">Roll Number</td><td style="padding:3px 6px;font-weight:700;font-size:13px">: ${s.roll||'—'}</td></tr>
+                <tr><td style="color:#64748B;padding:3px 0">Class & Section</td><td style="padding:3px 6px;font-weight:600">: Class ${cls}${s.section?' — Section '+s.section:''}</td></tr>
+                <tr><td style="color:#64748B;padding:3px 0">Father's Name</td><td style="padding:3px 6px">: ${s.father||s.fatherName||'—'}</td></tr>
+                <tr><td style="color:#64748B;padding:3px 0">Mother's Name</td><td style="padding:3px 6px">: ${s.mother||s.motherName||'—'}</td></tr>
+              </table>
+            </div>
+            ${showPhoto ? `<div style="width:80px;height:95px;border:1.5px dashed #9ca3af;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:12px">
+              <div style="text-align:center;color:#d1d5db;font-size:10px;line-height:1.5">Photo</div>
+            </div>` : ''}
+          </div>
+          <!-- Timetable -->
+          <div style="padding:10px 16px">
+            <div style="font-weight:700;font-size:12px;color:${tc.h};margin-bottom:6px">📅 Examination Schedule</div>
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <thead><tr style="background:${tc.h};color:white">
+                <th style="padding:6px 8px;text-align:left">Date</th>
+                <th style="padding:6px 8px;text-align:left">Day</th>
+                <th style="padding:6px 8px;text-align:left">Session</th>
+                <th style="padding:6px 8px;text-align:left">Time</th>
+                <th style="padding:6px 8px;text-align:left">Subject</th>
+                <th style="padding:6px 8px;text-align:center">Marks</th>
+              </tr></thead>
+              <tbody>${ttHtml}</tbody>
+            </table>
+          </div>
+          <!-- Instructions -->
+          <div style="margin:0 16px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px">
+            <div style="font-weight:700;font-size:11px;color:#92400e;margin-bottom:4px">📌 Instructions:</div>
+            <div style="font-size:10px;color:#78350f;line-height:1.8">
+              1. Enter exam hall 15 min before start. &nbsp; 2. Carry this card every day. &nbsp;
+              3. Mobile phones strictly prohibited. &nbsp; 4. Unfair means → cancellation.
+            </div>
+          </div>
+          <!-- Signatures -->
+          <div style="display:flex;justify-content:space-between;padding:8px 24px 14px;border-top:1px solid #e5e7eb">
+            <div style="text-align:center">
+              <div style="height:30px"></div>
+              <div style="border-top:1px solid #374151;padding-top:4px;font-size:11px;color:#374151">Student's Signature</div>
+            </div>
+            <div style="text-align:center">
+              <div style="height:30px"></div>
+              <div style="border-top:1px solid #374151;padding-top:4px;font-size:11px;color:#374151">
+                ${principal}<br><small style="color:#64748B">${school}</small>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    };
+
+    // Layout cards per page
+    let body = '';
+    if(perPage === 1) {
+        body = filtered.map(s=>`<div style="padding:14px 10px;page-break-after:always">${cardHtml(s)}</div>`).join('');
+    } else if(perPage === 2) {
+        for(let i=0;i<filtered.length;i+=2) {
+            body += `<div style="display:grid;grid-template-columns:1fr;gap:16px;padding:10px;page-break-after:always">
+              ${cardHtml(filtered[i])}
+              ${filtered[i+1]?`<div style="border-top:2px dashed #9ca3af;margin:4px 0"></div>${cardHtml(filtered[i+1])}` : ''}
+            </div>`;
+        }
+    } else {
+        // 4 per page — compact
+        for(let i=0;i<filtered.length;i+=4) {
+            const chunk = filtered.slice(i,i+4);
+            body += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px;page-break-after:always">
+              ${chunk.map(s=>`<div style="transform:scale(0.95);transform-origin:top left">${cardHtml(s)}</div>`).join('')}
+            </div>`;
+        }
+    }
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Admit Cards — ${exam.name}</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;background:${mode==='preview'?'#e5e7eb':'white'};padding:${mode==='preview'?'16px':'0'}}
+      @media print{body{background:white;padding:0}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+      @page{size:A4 portrait;margin:8mm}
+    </style></head><body>
+    ${body}
+    ${mode!=='preview'?`<script>if(document.fonts&&document.fonts.ready){document.fonts.ready.then(()=>{setTimeout(()=>{window.print();},400);})}else{setTimeout(()=>{window.print();},800);}<\/script>`:''}
+    </body></html>`;
+
+    showAlert(`✅ ${filtered.length} admit cards generated!`,'success');
+    const w = window.open('','_blank',`width=900,height=700`);
+    if(!w){showAlert('Popup blocked!','error');return;}
+    w.document.write(html);
     w.document.close();
 }
 
@@ -2962,193 +3253,387 @@ async function generateResultSheetEMS() {
 
 // ── AUTO-ASSIGN ───────────────────────────────────────────────────────────────
 async function renderAutoAssign(el) {
-    const [exams,students,teachers]=await Promise.all([DB.get('exams'),DB.get('students'),DB.get('teachers')]);
-    const examOpts=exams.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+    const [exams,students,teachers,halls,seatingPlans]=await Promise.all([
+        DB.get('exams'),DB.get('students'),DB.get('teachers'),DB.get('halls'),DB.get('seatingPlans')
+    ]);
+    const examOpts=exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+
+    // Teacher exclusion checkboxes
+    const tchkBoxes=teachers.map(t=>`
+      <label style="display:flex;align-items:center;gap:5px;padding:3px 8px;border-radius:5px;cursor:pointer;font-size:11px;background:var(--bg);border:1px solid var(--border);white-space:nowrap">
+        <input type="checkbox" class="aa-exclude-chk" value="${t.id}" style="width:12px;height:12px">
+        ${t.name}
+      </label>`).join('');
+
     el.innerHTML=`
     <div class="page-title">⚡ Auto-Assign Everything</div>
-    <div style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;border-radius:var(--radius);padding:20px;margin-bottom:20px;">
-      <h3 style="margin-bottom:6px;">One-click: Hall Seating + Invigilator Duties</h3>
-      <p style="opacity:0.85;font-size:13px;">Automatically assign students to halls and teachers to duty from exam timetable data.</p>
+    <div style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;border-radius:var(--radius);padding:18px 20px;margin-bottom:16px">
+      <h3 style="margin-bottom:4px;font-size:15px">One-click: Seating Plan + Invigilator Duty</h3>
+      <p style="opacity:0.85;font-size:12px">Seating plan ও invigilator duty automatically generate ও save করুন</p>
     </div>
-    <div class="card">
+
+    <div class="card" style="margin-bottom:14px">
       <div class="card-title">⚙️ Configuration</div>
       <div class="form-row">
         <div class="form-group"><label>Exam *</label>
           <select id="aaExam" onchange="aaInfo()"><option value="">--Select--</option>${examOpts}</select>
         </div>
-        <div class="form-group"><label>Students per Hall</label>
-          <input type="number" id="aaCap" value="30" min="5" max="100" oninput="aaInfo()">
-        </div>
-        <div class="form-group"><label>Hall Prefix</label>
-          <input id="aaPrefix" value="Hall">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Teachers per Hall per Session</label>
-          <input type="number" id="aaPerHall" value="2" min="1" max="5">
-        </div>
-        <div class="form-group"><label>Duty Assignment Method</label>
-          <select id="aaMethod">
-            <option value="workload">Workload Balanced</option>
-            <option value="round">Round Robin</option>
-          </select>
-        </div>
         <div class="form-group"><label>Seating Method</label>
           <select id="aaSeating">
-            <option value="mix">Class Mix (recommended)</option>
+            <option value="section">Section-wise (Boys A / Girls B)</option>
             <option value="class">Class-wise</option>
+            <option value="mix">Class Mix</option>
             <option value="roll">Roll order</option>
           </select>
         </div>
+        <div class="form-group"><label>Hall / Room Assignment</label>
+          <select id="aaHallMode">
+            <option value="existing">Use existing Halls (from DB)</option>
+            <option value="seating">Use existing Seating Plan rooms</option>
+            <option value="auto">Auto-generate (prefix + number)</option>
+          </select>
+        </div>
       </div>
-      <div style="display:flex;gap:14px;margin-bottom:16px;">
-        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
-          <input type="checkbox" id="aaNoConflict" checked style="width:16px;height:16px;">
-          Avoid teacher's own class exam duty
+      <div class="form-row">
+        <div class="form-group"><label>Hall Prefix <small>(if auto)</small></label>
+          <input id="aaPrefix" value="R-">
+        </div>
+        <div class="form-group"><label>Students per Hall <small>(if auto)</small></label>
+          <input type="number" id="aaCap" value="30" min="5" max="100" oninput="aaInfo()">
+        </div>
+        <div class="form-group"><label>Teachers per Hall per Session</label>
+          <input type="number" id="aaPerHall" value="2" min="1" max="5">
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="aaNoConflict" checked style="width:15px;height:15px">
+          Avoid teacher's own class duty
         </label>
-        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
-          <input type="checkbox" id="aaMaxDuty" checked style="width:16px;height:16px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="aaMaxDuty" checked style="width:15px;height:15px">
           Max 3 duties per teacher per day
         </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="aaSaveOnly" style="width:15px;height:15px">
+          Save only (no print)
+        </label>
       </div>
-      <div id="aaInfoBox" style="background:#e8f5e9;padding:12px 16px;border-radius:8px;font-size:13px;color:#2e7d32;margin-bottom:16px;display:none;"></div>
+
+      <!-- Teacher Exclusion -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">❌ Exclude from Duty (check to exclude)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:130px;overflow-y:auto;padding:8px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
+          ${tchkBoxes||'<span style="font-size:12px;color:var(--text-2)">No teachers</span>'}
+        </div>
+        <div style="display:flex;gap:6px;margin-top:5px">
+          <button onclick="document.querySelectorAll('.aa-exclude-chk').forEach(c=>c.checked=false)"
+            style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--bg);color:var(--text);font-family:inherit">
+            Clear All
+          </button>
+          <button onclick="document.querySelectorAll('.aa-exclude-chk').forEach(c=>c.checked=true)"
+            style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:var(--bg);color:var(--text);font-family:inherit">
+            Select All
+          </button>
+        </div>
+      </div>
+
+      <div id="aaInfoBox" style="background:#e8f5e9;padding:12px 16px;border-radius:8px;font-size:13px;color:#2e7d32;margin-bottom:14px;display:none"></div>
       <div class="btn-group">
-        <button class="btn btn-primary" onclick="aaInfoBtn()">👁️ Preview</button>
-        <button class="btn btn-success" onclick="aaRunAll()" style="font-size:15px;padding:12px 24px;">⚡ Generate Everything & Print</button>
+        <button class="btn btn-primary" onclick="aaInfo();showAlert('Info updated.','info')">👁️ Preview Info</button>
+        <button class="btn btn-success" onclick="aaRunAll()" style="font-size:14px;padding:10px 24px">⚡ Generate & Save</button>
       </div>
+    </div>
+
+    <!-- Available halls info -->
+    <div class="card">
+      <div class="card-title">🏫 Available Halls (${halls.length})</div>
+      ${halls.length ? `
+      <div class="table-wrap"><table>
+        <thead><tr><th>Hall Name</th><th>Capacity</th><th>1H Assigned</th><th>2H Assigned</th></tr></thead>
+        <tbody>${halls.map(h=>`<tr>
+          <td><strong>${h.name||h.id}</strong></td>
+          <td style="text-align:center">${h.capacity||'—'}</td>
+          <td style="text-align:center">${h.assigned1H||'—'}</td>
+          <td style="text-align:center">${h.assigned2H||'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` :
+      `<p style="color:var(--text-2);padding:16px;text-align:center">
+        No halls found. Import from Exam Docs page or add manually in Exam Halls page.
+      </p>`}
     </div>`;
 }
 
 async function aaInfo() {
     const examId=document.getElementById('aaExam')?.value;
     const cap=parseInt(document.getElementById('aaCap')?.value)||30;
+    const hallMode=document.getElementById('aaHallMode')?.value||'auto';
     if(!examId) return;
-    const [students,tts,teachers]=await Promise.all([DB.get('students'),DB.get('examTimetables'),DB.get('teachers')]);
+    const [students,tts,teachers,halls,seatingPlans]=await Promise.all([
+        DB.get('students'),DB.get('examTimetables'),DB.get('teachers'),
+        DB.get('halls'),DB.get('seatingPlans')
+    ]);
     const examTT=tts.filter(t=>String(t.examId)===String(examId));
     const dates=[...new Set(examTT.map(t=>t.date))];
-    const halls=Math.ceil(students.length/cap);
+    let hallNames=[];
+    if(hallMode==='existing') hallNames=halls.map(h=>h.name||h.id);
+    else if(hallMode==='seating'){
+        const sp=seatingPlans.find(p=>String(p.examId)===String(examId));
+        if(sp&&sp.plan) hallNames=[...new Set(sp.plan.map(p=>p.roomName||p.roomNo||''))].filter(Boolean);
+    }
+    const hallCount=hallNames.length||Math.ceil(students.length/cap);
+    const excluded=document.querySelectorAll('.aa-exclude-chk:checked').length;
     const box=document.getElementById('aaInfoBox');
     if(!box) return;
     box.style.display='block';
-    box.innerHTML=`📅 ${dates.length} exam days | 👨‍🎓 ${students.length} students → 🏛️ ${halls} halls (${cap}/hall) | 👨‍🏫 ${teachers.length} teachers available`;
+    box.innerHTML=`
+      📅 <b>${dates.length}</b> exam days &nbsp;|&nbsp;
+      👨‍🎓 <b>${students.length}</b> students &nbsp;|&nbsp;
+      🏫 <b>${hallCount}</b> halls ${hallNames.length?'('+hallNames.join(', ')+')':'(auto)'} &nbsp;|&nbsp;
+      👨‍🏫 <b>${teachers.length-excluded}</b> active teachers (${excluded} excluded) &nbsp;|&nbsp;
+      📋 <b>${examTT.length}</b> timetable entries`;
 }
 
-async function aaInfoBtn() { await aaInfo(); showAlert('Preview updated above.','info'); }
+async function aaInfoBtn() { await aaInfo(); showAlert('Preview updated.','info'); }
 
 async function aaRunAll() {
     const examId=document.getElementById('aaExam').value;
     if(!examId){showAlert('Select an Exam.','error');return;}
     const cap=parseInt(document.getElementById('aaCap').value)||30;
-    const prefix=document.getElementById('aaPrefix').value||'Hall';
+    const prefix=document.getElementById('aaPrefix').value||'R-';
     const perHall=parseInt(document.getElementById('aaPerHall').value)||2;
-    const method=document.getElementById('aaMethod').value;
+    const method=document.getElementById('aaMethod')?.value||'workload';
     const seating=document.getElementById('aaSeating').value;
+    const hallMode=document.getElementById('aaHallMode').value;
     const noConflict=document.getElementById('aaNoConflict').checked;
     const maxDuty=document.getElementById('aaMaxDuty').checked;
-    const [exams,students,teachers,timetables,routines,settings]=await Promise.all([
+    const saveOnly=document.getElementById('aaSaveOnly')?.checked||false;
+
+    const excludedIds=new Set([...document.querySelectorAll('.aa-exclude-chk:checked')].map(c=>c.value));
+
+    const [exams,students,allTeachers,timetables,halls,seatingPlans,settings]=await Promise.all([
         DB.get('exams'),DB.get('students'),DB.get('teachers'),
-        DB.get('examTimetables'),DB.get('routines'),DB.getObj('settings')]);
+        DB.get('examTimetables'),DB.get('halls'),DB.get('seatingPlans'),DB.getObj('settings')
+    ]);
+
+    const teachers=allTeachers.filter(t=>!excludedIds.has(String(t.id)));
     const exam=exams.find(e=>String(e.id)===String(examId));
     const examTT=timetables.filter(t=>String(t.examId)===String(examId));
-    if(!exam||!students.length||!teachers.length||!examTT.length){
-        showAlert('Ensure exam, students, teachers & timetable all exist.','error');return;}
+
+    if(!exam){showAlert('Exam not found.','error');return;}
+    if(!students.length){showAlert('No students found. Import students first.','error');return;}
+    if(!teachers.length){showAlert('No teachers available (all excluded?).','error');return;}
+    if(!examTT.length){showAlert('No timetable found for this exam. Add timetable first.','error');return;}
+
     const schoolName=settings.schoolName||'Ramnagar High School (H.S.)';
-    // Seating
+
+    // ── Get hall names ──
+    let roomNames=[];
+    if(hallMode==='existing') {
+        roomNames=halls.map(h=>h.name||h.id);
+    } else if(hallMode==='seating') {
+        const sp=seatingPlans.find(p=>String(p.examId)===String(examId));
+        if(sp&&sp.plan) {
+            roomNames=[...new Set(sp.plan.map(p=>p.roomName||p.roomNo||''))].filter(Boolean);
+            roomNames.sort((a,b)=>parseInt(String(a).replace(/\D/g,'')||0)-parseInt(String(b).replace(/\D/g,'')||0));
+        }
+    }
+
+    // ── Build seating plan ──
     let ordered=[...students];
-    if(seating==='mix'){
-        const b={};students.forEach(s=>{const k=s.class||s.classId||'?';if(!b[k])b[k]=[];b[k].push(s);});
+    if(seating==='section') {
+        // Boys first, then Girls — sorted by class then roll
+        const boys=students.filter(s=>(s.section||s.gender||'').match(/^[Aa]|^[Mm]|^boy/i));
+        const girls=students.filter(s=>(s.section||s.gender||'').match(/^[Bb]|^[Ff]|^girl/i));
+        const rest=students.filter(s=>!boys.includes(s)&&!girls.includes(s));
+        const sortFn=(a,b)=>(a.class||'').localeCompare(b.class||'')||String(a.roll).localeCompare(String(b.roll),undefined,{numeric:true});
+        boys.sort(sortFn); girls.sort(sortFn); rest.sort(sortFn);
+        ordered=[...boys,...girls,...rest];
+    } else if(seating==='class') {
+        ordered.sort((a,b)=>(a.class||'').localeCompare(b.class||'')||String(a.roll).localeCompare(String(b.roll),undefined,{numeric:true}));
+    } else if(seating==='mix') {
+        const b={};students.forEach(s=>{const k=s.class||'?';if(!b[k])b[k]=[];b[k].push(s);});
         Object.values(b).forEach(arr=>arr.sort((a,c)=>String(a.roll).localeCompare(String(c.roll),undefined,{numeric:true})));
         ordered=[];let go=true;const bArr=Object.values(b);
         while(go){go=false;bArr.forEach(arr=>{if(arr.length){ordered.push(arr.shift());go=true;}});}
-    } else if(seating==='class') {
-        ordered.sort((a,c)=>(a.class||'').localeCompare(c.class||'')||String(a.roll).localeCompare(String(c.roll),undefined,{numeric:true}));
     } else {
-        ordered.sort((a,c)=>String(a.roll).localeCompare(String(c.roll),undefined,{numeric:true}));
+        ordered.sort((a,b)=>String(a.roll).localeCompare(String(b.roll),undefined,{numeric:true}));
     }
-    const plan=[]; let hallNo=1,seatNo=1;
-    ordered.forEach(s=>{if(seatNo>cap){hallNo++;seatNo=1;}
-        plan.push({seatNo:seatNo++,hallNo,hallName:`${prefix} ${hallNo}`,roll:s.roll||'—',name:s.name||'—',class:s.class||s.classId||'—',section:s.section||'—'});});
-    const totalHalls=hallNo;
-    // Invigilator
+
+    // Assign to rooms
+    const plan=[];
+    if(roomNames.length) {
+        // Use existing room names with capacity
+        let ri=0,seatNo=1,roomCap=cap;
+        // Get capacity from halls if available
+        const hallCapMap={};halls.forEach(h=>{hallCapMap[h.name||h.id]=h.capacity||cap;});
+        ordered.forEach(s=>{
+            if(ri>=roomNames.length){ri=roomNames.length-1;}
+            const rCap=hallCapMap[roomNames[ri]]||cap;
+            if(seatNo>rCap&&ri<roomNames.length-1){ri++;seatNo=1;}
+            plan.push({seatNo:seatNo++,hallNo:ri+1,roomName:roomNames[ri],
+                roll:s.roll||'—',name:s.name||'—',
+                class:s.class||s.classId||'—',section:s.section||'—'});
+        });
+    } else {
+        // Auto-generate room names
+        let hallNo=1,seatNo=1;
+        ordered.forEach(s=>{
+            if(seatNo>cap){hallNo++;seatNo=1;}
+            const rName=`${prefix}${hallNo}`;
+            if(!roomNames.includes(rName)) roomNames.push(rName);
+            plan.push({seatNo:seatNo++,hallNo,roomName:rName,
+                roll:s.roll||'—',name:s.name||'—',
+                class:s.class||s.classId||'—',section:s.section||'—'});
+        });
+    }
+    const totalHalls=roomNames.length;
+
+    // ── Build invigilator roster ──
     const dates=[...new Set(examTT.map(t=>t.date))].sort();
-    const tClasses={};routines.forEach(r=>{const tid=String(r.teacher||r.teacherId||'');if(!tClasses[tid])tClasses[tid]=new Set();tClasses[tid].add(r.className||r.class||'');});
+    const tClasses={};
+    teachers.forEach(t=>{
+        if(t.assignments) t.assignments.forEach(a=>{
+            const tid=String(t.id);
+            if(!tClasses[tid])tClasses[tid]=new Set();
+            tClasses[tid].add(a.class||'');
+        });
+        if(t.classes) String(t.classes).split(',').forEach(c=>{
+            const tid=String(t.id);
+            if(!tClasses[tid])tClasses[tid]=new Set();
+            tClasses[tid].add(c.trim());
+        });
+    });
     const dutyCount={};teachers.forEach(t=>dutyCount[String(t.id)]=0);
     const roster=[];
+
     for(const date of dates){
         const dayDuty={};teachers.forEach(t=>dayDuty[String(t.id)]=0);
-        const sessions=[...new Set(examTT.filter(t=>t.date===date).map(t=>t.session||'1st Half'))];
+        const sessions=[...new Set(examTT.filter(t=>t.date===date).map(t=>t.session||'1st Half'))].sort();
         for(const session of sessions){
             const examCls=new Set(examTT.filter(t=>t.date===date&&(t.session||'1st Half')===session).map(t=>t.className||''));
-            for(let h=1;h<=totalHalls;h++){
-                let sorted=[...teachers];
-                if(method==='workload') sorted.sort((a,b)=>(dutyCount[String(a.id)]||0)-(dutyCount[String(b.id)]||0));
+            const subject=examTT.filter(t=>t.date===date&&(t.session||'1st Half')===session).map(t=>t.subject||'').join(', ');
+            for(const roomName of roomNames){
+                let sorted=[...teachers].sort((a,b)=>(dutyCount[String(a.id)]||0)-(dutyCount[String(b.id)]||0));
                 let asgn=0;
                 for(const t of sorted){
                     if(asgn>=perHall) break;
                     const tid=String(t.id);
-                    if(noConflict){const tc=tClasses[tid]||new Set();if([...examCls].some(c=>tc.has(c))) continue;}
-                    if(maxDuty&&dayDuty[tid]>=3) continue;
-                    roster.push({date,session,hall:`${prefix} ${h}`,teacherName:t.name,shortName:t.shortName||'',phone:t.phone||''});
-                    dutyCount[tid]++;dayDuty[tid]++;asgn++;
+                    if(excludedIds.has(tid)) continue;
+                    if(noConflict){const tc=tClasses[tid]||new Set();if([...examCls].some(c=>c&&tc.has(c)))continue;}
+                    if(maxDuty&&(dayDuty[tid]||0)>=3) continue;
+                    roster.push({date,session,hall:roomName,subject,
+                        teacherName:t.name,shortName:t.shortName||'',phone:t.phone||''});
+                    dutyCount[tid]++;dayDuty[tid]=(dayDuty[tid]||0)+1;asgn++;
                 }
             }
         }
     }
-    // Save
-    const sp=await DB.get('seatingPlans')||[];sp.push({id:Date.now().toString(),examId,examName:exam.name,plan,totalHalls,createdOn:new Date().toISOString()});
-    const ir=await DB.get('invigilatorRosters')||[];ir.push({id:(Date.now()+1).toString(),examId,examName:exam.name,roster,createdOn:new Date().toISOString()});
+
+    // ── Save to DB ──
+    const sp=await DB.get('seatingPlans')||[];
+    sp.push({id:Date.now().toString(),examId,examName:exam.name,
+        plan,totalHalls,roomNames,createdOn:new Date().toISOString()});
+    const ir=await DB.get('invigilatorRosters')||[];
+    ir.push({id:(Date.now()+1).toString(),examId,examName:exam.name,
+        roster,createdOn:new Date().toISOString()});
     await Promise.all([DB.set('seatingPlans',sp),DB.set('invigilatorRosters',ir)]);
     showAlert(`✅ Done! ${ordered.length} students → ${totalHalls} halls | ${roster.length} duties assigned`,'success');
-    // Print combined report
+
+    if(saveOnly) return;
+
+    // ── Print combined report ──
     let seatHTML='';
-    for(let h=1;h<=totalHalls;h++){
-        const hs=plan.filter(s=>s.hallNo===h);
+    roomNames.forEach(roomName=>{
+        const hs=plan.filter(s=>s.roomName===roomName);
+        if(!hs.length) return;
         const cls=[...new Set(hs.map(s=>s.class))].join(', ');
-        seatHTML+=`<div style="page-break-after:always;margin-bottom:30px;">
-          <div style="text-align:center;border-bottom:2px solid #1e3c72;margin-bottom:14px;padding-bottom:10px;"><h2 style="color:#1e3c72;font-size:18px;">🏫 ${schoolName}</h2><p style="font-size:13px;">Seating Arrangement — ${exam.name}</p></div>
-          <div style="background:#1e3c72;color:#fff;padding:9px 14px;border-radius:4px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;margin-bottom:8px;">
-            <span>🚪 ${prefix} ${h}</span><span>Classes: ${cls} | ${hs.length} students</span></div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <thead><tr style="background:#2a5298;color:#fff;"><th style="padding:7px 9px;">Seat</th><th style="padding:7px 9px;">Roll</th><th style="padding:7px 9px;">Name</th><th style="padding:7px 9px;">Class</th><th style="padding:7px 9px;text-align:center;">Sec</th></tr></thead>
-            <tbody>${hs.map((s,i)=>`<tr style="background:${i%2?'#f0f4ff':'#fff'}"><td style="padding:6px 9px;border:1px solid #ddd;text-align:center;"><strong>${s.seatNo}</strong></td><td style="padding:6px 9px;border:1px solid #ddd;">${s.roll}</td><td style="padding:6px 9px;border:1px solid #ddd;">${s.name}</td><td style="padding:6px 9px;border:1px solid #ddd;">${s.class}</td><td style="padding:6px 9px;border:1px solid #ddd;text-align:center;">${s.section}</td></tr>`).join('')}</tbody>
-          </table></div>`;
-    }
+        seatHTML+=`<div style="page-break-after:always;margin-bottom:24px">
+          <div style="text-align:center;border-bottom:2px solid #1B3A6B;margin-bottom:12px;padding-bottom:8px">
+            <h2 style="color:#1B3A6B;font-size:17px">${schoolName}</h2>
+            <p style="font-size:12px">Seating Arrangement — ${exam.name}</p>
+          </div>
+          <div style="background:#1B3A6B;color:#fff;padding:8px 14px;border-radius:4px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;margin-bottom:8px">
+            <span>🚪 ${roomName}</span><span>Classes: ${cls} | ${hs.length} students</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="background:#2C4F8C;color:#fff">
+              <th style="padding:7px 9px">Seat</th><th style="padding:7px 9px">Roll</th>
+              <th style="padding:7px 9px">Name</th><th style="padding:7px 9px">Class</th><th style="padding:7px 9px">Section</th>
+            </tr></thead>
+            <tbody>${hs.map((s,i)=>`<tr style="background:${i%2?'#EEF3FA':'#fff'}">
+              <td style="padding:6px 9px;border:1px solid #C8D8EC;text-align:center"><strong>${s.seatNo}</strong></td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC">${s.roll}</td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC">${s.name}</td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC">${s.class}</td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC">${s.section}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+    });
+
     const byDate={};roster.forEach(r=>{if(!byDate[r.date])byDate[r.date]=[];byDate[r.date].push(r);});
     let invHTML='';
-    for(const date of dates){
-        const dStr=new Date(date).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'});
-        invHTML+=`<div style="margin-bottom:20px;page-break-inside:avoid;">
-          <div style="background:#e65100;color:#fff;padding:7px 14px;font-weight:700;border-radius:4px;margin-bottom:8px;">📅 ${dStr}</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <thead><tr style="background:#1e3c72;color:#fff;"><th style="padding:7px 9px;">Session</th><th style="padding:7px 9px;">Hall</th><th style="padding:7px 9px;">Teacher</th><th style="padding:7px 9px;">Phone</th></tr></thead>
-            <tbody>${(byDate[date]||[]).map(r=>`<tr><td style="padding:6px 9px;border:1px solid #ddd;">${r.session}</td><td style="padding:6px 9px;border:1px solid #ddd;">${r.hall}</td><td style="padding:6px 9px;border:1px solid #ddd;"><strong>${r.teacherName}</strong> ${r.shortName?'('+r.shortName+')':''}</td><td style="padding:6px 9px;border:1px solid #ddd;">${r.phone}</td></tr>`).join('')}</tbody>
-          </table></div>`;
-    }
-    const summary={};roster.forEach(r=>{if(!summary[r.teacherName])summary[r.teacherName]=0;summary[r.teacherName]++;});
-    const sumRows=Object.entries(summary).sort((a,b)=>b[1]-a[1]).map(([n,c])=>`<tr><td style="padding:7px 9px;border:1px solid #ddd;">${n}</td><td style="padding:7px 9px;border:1px solid #ddd;text-align:center;font-weight:700;">${c}</td></tr>`).join('');
-    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Exam Assignment Report</title>
-    <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;padding:16px;color:#000;}
-    h2{color:#1e3c72;margin-bottom:10px;}@media print{body{padding:6px;}}</style></head><body>
-    <div style="text-align:center;border-bottom:3px double #1e3c72;padding-bottom:12px;margin-bottom:20px;">
-      <h1 style="font-size:20px;color:#1e3c72;">🏫 ${schoolName}</h1>
-      <h2 style="font-size:15px;color:#2a5298;margin-top:4px;">Exam Assignment Report — ${exam.name}</h2>
-      <p style="font-size:12px;color:#555;margin-top:4px;">Students: ${ordered.length} | Halls: ${totalHalls} | Duties: ${roster.length}</p>
+    dates.forEach(date=>{
+        const dStr=new Date(date).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short',year:'numeric'});
+        invHTML+=`<div style="margin-bottom:18px;page-break-inside:avoid">
+          <div style="background:#1B3A6B;color:#fff;padding:7px 14px;font-weight:700;border-radius:4px;margin-bottom:8px">📅 ${dStr}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="background:#2C4F8C;color:#fff">
+              <th style="padding:7px 9px">Session</th><th style="padding:7px 9px">Hall/Room</th>
+              <th style="padding:7px 9px">Subject</th><th style="padding:7px 9px">Teacher</th><th style="padding:7px 9px">Sign</th>
+            </tr></thead>
+            <tbody>${(byDate[date]||[]).map((r,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
+              <td style="padding:6px 9px;border:1px solid #C8D8EC;font-weight:600;color:#1B3A6B">${r.session}</td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC;font-weight:700;color:#1B3A6B">${r.hall}</td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC;color:#8B5E0A">${r.subject||'—'}</td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC"><strong>${r.teacherName}</strong>${r.shortName?' ('+r.shortName+')':''}</td>
+              <td style="padding:6px 9px;border:1px solid #C8D8EC;width:100px"></td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+    });
+
+    const summary={};roster.forEach(r=>{if(!summary[r.teacherName])summary[r.teacherName]={count:0,phone:r.phone};summary[r.teacherName].count++;});
+    const sumRows=Object.entries(summary).sort((a,b)=>b[1].count-a[1].count)
+        .map(([n,d],i)=>`<tr style="background:${i%2?'#F4F8FF':'#fff'}">
+          <td style="padding:7px 9px;border:1px solid #C8D8EC">${n}</td>
+          <td style="padding:7px 9px;border:1px solid #C8D8EC">${d.phone||'—'}</td>
+          <td style="padding:7px 9px;border:1px solid #C8D8EC;text-align:center;font-weight:700">${d.count}</td>
+          <td style="padding:7px 9px;border:1px solid #C8D8EC;width:150px"></td>
+        </tr>`).join('');
+
+    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:14px;color:#000}@media print{body{padding:4px}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>
+    </head><body>
+    <div style="text-align:center;border-bottom:3px double #1B3A6B;padding-bottom:12px;margin-bottom:18px">
+      <h1 style="font-size:19px;color:#1B3A6B">${schoolName}</h1>
+      <h2 style="font-size:14px;color:#2C4F8C;margin-top:4px">Exam Assignment Report — ${exam.name}</h2>
+      <p style="font-size:12px;color:#555;margin-top:4px">Students: ${ordered.length} | Halls: ${totalHalls} | Duties: ${roster.length} | Excluded: ${excludedIds.size} teachers</p>
     </div>
-    <h2 style="font-size:16px;border-bottom:2px solid #1e3c72;padding-bottom:6px;margin-bottom:16px;">🪑 Section 1: Seating Arrangement</h2>
+    <h2 style="font-size:15px;border-bottom:2px solid #1B3A6B;padding-bottom:5px;margin-bottom:14px;color:#1B3A6B">🪑 Section 1: Seating Arrangement</h2>
     ${seatHTML}
-    <h2 style="font-size:16px;border-bottom:2px solid #1e3c72;padding-bottom:6px;margin-bottom:16px;">👮 Section 2: Invigilator Duty Roster</h2>
+    <h2 style="font-size:15px;border-bottom:2px solid #1B3A6B;padding-bottom:5px;margin-bottom:14px;color:#1B3A6B">👮 Section 2: Invigilator Duty Roster</h2>
     ${invHTML}
-    <h2 style="font-size:16px;border-bottom:2px solid #1e3c72;padding-bottom:6px;margin-bottom:12px;">📊 Section 3: Teacher Duty Summary</h2>
-    <table style="width:100%;border-collapse:collapse;font-size:12px;">
-      <thead><tr style="background:#1e3c72;color:#fff;"><th style="padding:8px 10px;text-align:left;">Teacher</th><th style="padding:8px 10px;text-align:center;">Total Duties</th></tr></thead>
+    <h2 style="font-size:15px;border-bottom:2px solid #1B3A6B;padding-bottom:5px;margin-bottom:12px;color:#1B3A6B">📊 Section 3: Teacher Duty Summary</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#1B3A6B;color:#fff">
+        <th style="padding:7px 10px;text-align:left">Teacher</th>
+        <th style="padding:7px 10px;text-align:left">Phone</th>
+        <th style="padding:7px 10px;text-align:center">Total Duties</th>
+        <th style="padding:7px 10px;text-align:left">Acknowledgement</th>
+      </tr></thead>
       <tbody>${sumRows}</tbody>
     </table>
-    <div style="display:flex;justify-content:space-between;margin-top:50px;">
-      <div style="text-align:center;"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:12px;margin-top:40px;">Exam Controller</div></div>
-      <div style="text-align:center;"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:12px;margin-top:40px;">Headmaster / Principal</div></div>
+    <div style="display:flex;justify-content:space-between;margin-top:50px">
+      <div style="text-align:center"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:12px;margin-top:40px">Exam Controller</div></div>
+      <div style="text-align:center"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:12px;margin-top:40px">Headmaster / Principal</div></div>
     </div>
     </body></html>`;
-    const w=window.open('','_blank');w.document.write(html);w.document.close();setTimeout(()=>w.print(),600);
+
+    const w=window.open('','_blank');
+    if(!w){showAlert('Popup blocked! Allow popups.','error');return;}
+    w.document.write(html);w.document.close();setTimeout(()=>w.print(),600);
 }
 
 
