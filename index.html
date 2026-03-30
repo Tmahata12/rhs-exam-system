@@ -6,10 +6,16 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https: wss:;">
 <title>RHS Exam Management System</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎓%3C/text%3E%3C/svg%3E">
+<!-- Preconnect for faster external loads -->
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- XLSX needed immediately for imports — load sync -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<!-- Chart.js & PDF — defer, not needed at login -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js" defer></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
@@ -397,6 +403,23 @@ tbody tr:hover td { background:#f8faff; }
 </head>
 <body>
 
+<!-- INITIAL LOADING SCREEN — shows while JS parses, hides on DOMContentLoaded -->
+<div id="initialLoader" style="position:fixed;inset:0;background:linear-gradient(135deg,#1B3A6B,#2C4F8C);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99999;color:white;font-family:Arial,sans-serif">
+  <div style="font-size:52px;margin-bottom:16px;animation:spin 2s linear infinite">🎓</div>
+  <div style="font-size:20px;font-weight:700;margin-bottom:6px">RHS Exam Management System</div>
+  <div style="font-size:13px;opacity:0.8;margin-bottom:24px">Ramnagar High School (H.S.)</div>
+  <div style="display:flex;gap:6px">
+    <div style="width:8px;height:8px;border-radius:50%;background:white;animation:dot 1.2s ease-in-out infinite;opacity:.4"></div>
+    <div style="width:8px;height:8px;border-radius:50%;background:white;animation:dot 1.2s ease-in-out .2s infinite;opacity:.4"></div>
+    <div style="width:8px;height:8px;border-radius:50%;background:white;animation:dot 1.2s ease-in-out .4s infinite;opacity:.4"></div>
+  </div>
+  <div id="loadMsg" style="font-size:12px;opacity:0.6;margin-top:14px">Starting...</div>
+</div>
+<style>
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes dot{0%,80%,100%{opacity:.4;transform:scale(1)}40%{opacity:1;transform:scale(1.3)}}
+</style>
+
 <!-- ALERT BAR -->
 <div id="alertBar" class="alert-bar"></div>
 
@@ -570,35 +593,81 @@ async function apiFetch(ep, method='GET', body=null) {
 }
 
 const DB = {
+    // Cache TTL: 5 minutes for fast navigation
+    _ttl: 5 * 60 * 1000,
+    _ts: {},
+
     async get(key) {
+        // 1. Return LocalStorage immediately if fresh (< 5 min)
+        const now = Date.now();
+        const tsKey = '_ts_'+key;
+        const cached = localStorage.getItem('_c_'+key);
+        const ts = parseInt(localStorage.getItem(tsKey)||'0');
+        if(cached && (now - ts) < this._ttl) {
+            // Return cached immediately, sync in background
+            this._bgSync(key);
+            return JSON.parse(cached);
+        }
+        // 2. Fetch from MongoDB if stale/missing
         try {
             const data = await apiFetch('/api/'+key);
             const arr  = Array.isArray(data) ? data : (data.data||[]);
             localStorage.setItem('_c_'+key, JSON.stringify(arr));
+            localStorage.setItem(tsKey, String(Date.now()));
             return arr;
         } catch(e) {
-            const c = localStorage.getItem('_c_'+key);
-            return c ? JSON.parse(c) : [];
+            // 3. Fallback to LocalStorage even if stale
+            return cached ? JSON.parse(cached) : [];
         }
     },
-    async set(key, value) {
-        localStorage.setItem('_c_'+key, JSON.stringify(value));
-        try { await apiFetch('/api/'+key+'/bulk','POST',{data:value}); }
-        catch(e) { console.warn('DB.set fallback:', e.message); }
+
+    // Background sync without blocking UI
+    _bgSync(key) {
+        const tsKey = '_ts_'+key;
+        apiFetch('/api/'+key).then(data=>{
+            const arr = Array.isArray(data) ? data : (data.data||[]);
+            localStorage.setItem('_c_'+key, JSON.stringify(arr));
+            localStorage.setItem(tsKey, String(Date.now()));
+        }).catch(()=>{});
     },
+
+    async set(key, value) {
+        // Write to LocalStorage immediately (instant UI update)
+        localStorage.setItem('_c_'+key, JSON.stringify(value));
+        localStorage.setItem('_ts_'+key, String(Date.now()));
+        // Sync to MongoDB in background
+        try { await apiFetch('/api/'+key+'/bulk','POST',{data:value}); }
+        catch(e) { console.warn('DB.set offline:', e.message); }
+    },
+
     async getObj(key) {
+        const cached = localStorage.getItem('_c_'+key);
+        const ts = parseInt(localStorage.getItem('_ts_'+key)||'0');
+        if(cached && (Date.now()-ts) < this._ttl) {
+            this._bgSync(key);
+            const d = JSON.parse(cached);
+            return Array.isArray(d) ? (d[0]||{}) : d;
+        }
         try {
             const data = await apiFetch('/api/'+key);
             localStorage.setItem('_c_'+key, JSON.stringify(data));
+            localStorage.setItem('_ts_'+key, String(Date.now()));
             return Array.isArray(data) ? (data[0]||{}) : data;
         } catch(e) {
-            const c = localStorage.getItem('_c_'+key);
-            return c ? JSON.parse(c) : {};
+            if(cached) { const d=JSON.parse(cached); return Array.isArray(d)?(d[0]||{}):d; }
+            return {};
         }
     },
+
     async setObj(key, value) {
         localStorage.setItem('_c_'+key, JSON.stringify(value));
+        localStorage.setItem('_ts_'+key, String(Date.now()));
         try { await apiFetch('/api/'+key,'PUT',value); } catch(e) {}
+    },
+
+    // Force refresh (clear cache for a key)
+    invalidate(key) {
+        localStorage.removeItem('_ts_'+key);
     }
 };
 
@@ -741,7 +810,15 @@ function showPage(page) {
         circular:     renderCircular,
     };
     if (pages[page]) {
-        content.innerHTML = '<div style="text-align:center;padding:60px;color:#aaa;">⏳ Loading...</div>';
+        content.innerHTML = `
+        <div style="padding:20px 24px">
+          <div style="height:28px;background:var(--border);border-radius:6px;width:200px;margin-bottom:20px;animation:shimmer 1.2s ease-in-out infinite"></div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+            ${[1,2,3,4].map(()=>`<div style="height:80px;background:var(--border);border-radius:10px;animation:shimmer 1.2s ease-in-out infinite"></div>`).join('')}
+          </div>
+          <div style="height:200px;background:var(--border);border-radius:10px;animation:shimmer 1.2s ease-in-out infinite"></div>
+        </div>
+        <style>@keyframes shimmer{0%,100%{opacity:.6}50%{opacity:1}}</style>`;
         pages[page](content);
     }
 }
@@ -7138,11 +7215,42 @@ async function renderCircular(el) {
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', ()=>{
+    // Hide initial loader
+    const loader = document.getElementById('initialLoader');
+    if(loader) {
+        loader.style.transition = 'opacity 0.3s';
+        loader.style.opacity = '0';
+        setTimeout(()=>loader.remove(), 350);
+    }
+
     loadTheme();
     // Check existing session
     const user=sessionStorage.getItem('ems_user');
     const role=sessionStorage.getItem('ems_role');
     if(user&&role) startApp(user,role,false);
+
+    // ── Keep-alive ping every 8 min to prevent Render.com sleep ──
+    const BACKEND = 'https://rhs-prms-backend.onrender.com';
+    const ping = () => {
+        fetch(`${BACKEND}/api/ping`, {method:'GET', signal:AbortSignal.timeout(5000)})
+            .catch(()=>{}); // silently ignore errors
+    };
+    // Ping after 30 sec (let page settle first), then every 8 min
+    setTimeout(()=>{
+        ping();
+        setInterval(ping, 8 * 60 * 1000);
+    }, 30000);
+
+    // Update loader message during load
+    const loadMsg = document.getElementById('loadMsg');
+    if(loadMsg) {
+        const msgs = ['Loading data...','Connecting...','Almost ready...'];
+        let i=0;
+        const t = setInterval(()=>{
+            if(loadMsg.parentNode) loadMsg.textContent = msgs[i++%msgs.length];
+            else clearInterval(t);
+        }, 600);
+    }
 });
 
 document.addEventListener('keydown', e=>{
