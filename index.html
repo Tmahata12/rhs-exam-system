@@ -487,6 +487,10 @@ tbody tr:hover td { background:#f8faff; }
       <div class="sidebar-item" onclick="showPage('seating')" id="nav-seating">
         <span class="icon">🪑</span><span>Seating Plan</span>
       </div>
+      <div class="sidebar-section">Exam Day</div>
+      <div class="sidebar-item" onclick="showPage('livediary')" id="nav-livediary">
+        <span class="icon">📓</span><span>Live Room Diary</span>
+      </div>
       <div class="sidebar-section">Duty</div>
       <div class="sidebar-item" onclick="showPage('invigilator')" id="nav-invigilator">
         <span class="icon">👮</span><span>Invigilator</span>
@@ -531,7 +535,7 @@ tbody tr:hover td { background:#f8faff; }
       </div>
       <div class="sidebar-section">Export</div>
       <div class="sidebar-item" onclick="showPage('export')" id="nav-export">
-        <span class="icon">📤</span><span>Export & Share</span>
+        <span class="icon">🗄️</span><span>Data Hub</span>
       </div>
       <div class="sidebar-section">More</div>
       <div class="sidebar-item" onclick="showPage('qbank')" id="nav-qbank">
@@ -555,6 +559,9 @@ tbody tr:hover td { background:#f8faff; }
       <div class="sidebar-section">Exam Print</div>
       <div class="sidebar-item" onclick="showPage('examdocs')" id="nav-examdocs">
         <span class="icon">🖨️</span><span>Exam Documents</span>
+      </div>
+      <div class="sidebar-item" onclick="showPage('nextexam')" id="nav-nextexam">
+        <span class="icon">🗓️</span><span>Next Exam Setup</span>
       </div>
     </div>
 
@@ -803,6 +810,8 @@ function showPage(page) {
         parentnotice: renderParentNotice,
         reexam:       renderReExam,
         qpaper:       renderQPaper,
+        livediary:    renderLiveDiary,
+        nextexam:     renderNextExam,
         examdocs:     renderExamDocs,
         teachers:     renderTeachers,
         answerscript: renderAnswerScript,
@@ -2544,7 +2553,7 @@ async function generateRoster(mode='print') {
         return;
     }
 
-    // PRINT — build summary stats
+    // PRINT — official format
     const byDate={};
     roster.forEach(r=>{if(!byDate[r.date])byDate[r.date]=[];byDate[r.date].push(r);});
     const summary={};
@@ -2554,84 +2563,74 @@ async function generateRoster(mode='print') {
         summary[r.teacherName][r.sessionKey==='1st Half'?'1H':'2H']++;
     });
 
-    let html=`<div style="font-family:Arial,sans-serif">
-    <div style="text-align:center;border-bottom:3px double #1B3A6B;padding-bottom:12px;margin-bottom:20px">
-      <div style="font-size:20px;font-weight:700;color:#1B3A6B">${schoolName}</div>
-      <div style="font-size:15px;font-weight:700;color:#2a5298;margin-top:4px">Invigilator Duty Roster — ${exam.name}</div>
-      <div style="font-size:12px;color:#555;margin-top:4px">
-        Total Duties: ${roster.length} &nbsp;|&nbsp; Active Teachers: ${Object.keys(summary).length} &nbsp;|&nbsp;
-        Excluded: ${excludedIds.size} &nbsp;|&nbsp; Halls: ${roomNames.join(', ')}
-      </div>
-    </div>`;
+    // Build pages — one page per date group (page-break-inside:avoid)
+    const settings2 = await DB.getObj('settings').catch(()=>({}));
+    const principal  = settings2.principalName||'Dasarath Bagdi';
+    const dise       = settings2.schoolCode||'19250206103';
+
+    let pages = [];
+
+    // Page 1+: Duty roster date-wise
+    let rosterHtml = offHeader(schoolName, exam.name, 'INVIGILATOR DUTY ROSTER',
+        `Total Duties: ${roster.length}  |  Active Teachers: ${Object.keys(summary).length}  |  Rooms: ${roomNames.join(', ')}`,
+        '', '');
 
     for(const date of dates){
-        const dStr=new Date(date).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short',year:'numeric'});
+        const dStr=new Date(date.includes('-')&&date.split('-')[2].length===4
+          ? date.split('-').reverse().join('-') : date)
+          .toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
         const dayRows=(byDate[date]||[]);
-        // Group by session
-        const bySess={};
-        dayRows.forEach(r=>{if(!bySess[r.session])bySess[r.session]=[];bySess[r.session].push(r);});
-
-        html+=`<div style="margin-bottom:22px;page-break-inside:avoid">
-          <div style="background:#1B3A6B;color:#fff;padding:8px 14px;font-weight:700;border-radius:4px 4px 0 0">📅 ${dStr}</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px">
-            <thead><tr style="background:#2C4F8C;color:#fff">
-              <th style="padding:7px 10px;text-align:left">Session</th>
-              <th style="padding:7px 10px;text-align:left">Hall / Room</th>
-              <th style="padding:7px 10px;text-align:left">Subject</th>
-              <th style="padding:7px 10px;text-align:left">Invigilator</th>
-              <th style="padding:7px 10px;text-align:left">Phone</th>
-              <th style="padding:7px 10px;text-align:left">Signature</th>
+        rosterHtml+=`<div class="no-break" style="margin-bottom:16px">
+          <div class="off-sec">📅 ${dStr}</div>
+          <table class="off-table">
+            <thead><tr>
+              <th>Session</th><th>Hall / Room</th><th>Subject</th>
+              <th>Invigilator</th><th>Phone</th><th style="width:120px">Signature</th>
             </tr></thead>
-            <tbody>
-        ${dayRows.map((r,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#EAF2FF'}">
-              <td style="padding:7px 10px;border:1px solid #C8D8EC;font-weight:600;color:#1B3A6B">${r.session}</td>
-              <td style="padding:7px 10px;border:1px solid #C8D8EC;font-weight:700;color:#1B3A6B">${r.hall}</td>
-              <td style="padding:7px 10px;border:1px solid #C8D8EC;color:#8B5E0A">${r.subject||'—'}</td>
-              <td style="padding:7px 10px;border:1px solid #C8D8EC"><strong>${r.teacherName}</strong>${r.shortName?' ('+r.shortName+')':''}</td>
-              <td style="padding:7px 10px;border:1px solid #C8D8EC">${r.phone||'—'}</td>
-              <td style="padding:7px 10px;border:1px solid #C8D8EC;width:120px"></td>
-            </tr>`).join('')}
-            </tbody>
+            <tbody>${dayRows.map((r,i)=>`<tr>
+              <td style="font-weight:600;color:#1B3A6B">${r.session}</td>
+              <td style="font-weight:700;color:#1B3A6B">${r.hall}</td>
+              <td style="color:#8B5E0A">${r.subject||'—'}</td>
+              <td><strong>${r.teacherName}</strong>${r.shortName?' ('+r.shortName+')':''}</td>
+              <td>${r.phone||'—'}</td>
+              <td></td>
+            </tr>`).join('')}</tbody>
           </table>
         </div>`;
     }
 
-    // Duty summary table
-    const sumRows=Object.entries(summary)
-        .sort((a,b)=>b[1].count-a[1].count)
-        .map(([n,d],i)=>`<tr style="background:${i%2?'#F4F8FF':'#fff'}">
-          <td style="padding:7px 10px;border:1px solid #C8D8EC">${n}</td>
-          <td style="padding:7px 10px;border:1px solid #C8D8EC">${d.phone||'—'}</td>
-          <td style="padding:7px 10px;border:1px solid #C8D8EC;text-align:center">${d['1H']}</td>
-          <td style="padding:7px 10px;border:1px solid #C8D8EC;text-align:center">${d['2H']}</td>
-          <td style="padding:7px 10px;border:1px solid #C8D8EC;text-align:center;font-weight:700;color:#1B3A6B">${d.count}</td>
-          <td style="padding:7px 10px;border:1px solid #C8D8EC;width:150px"></td>
+    // Teacher Duty Summary
+    const sumRows=Object.entries(summary).sort((a,b)=>b[1].count-a[1].count)
+        .map(([n,d],i)=>`<tr>
+          <td><strong>${n}</strong></td>
+          <td>${d.phone||'—'}</td>
+          <td style="text-align:center">${d['1H']}</td>
+          <td style="text-align:center">${d['2H']}</td>
+          <td style="text-align:center;font-weight:700;color:#1B3A6B">${d.count}</td>
+          <td style="width:150px"></td>
         </tr>`).join('');
 
-    html+=`<div style="margin-top:24px;page-break-inside:avoid">
-      <div style="font-size:15px;font-weight:700;color:#1B3A6B;border-bottom:2px solid #1B3A6B;padding-bottom:6px;margin-bottom:10px">
-        📊 Teacher Duty Summary
-        ${excludedIds.size>0?`<span style="font-size:12px;color:#dc2626;font-weight:400;margin-left:12px">⚠️ ${excludedIds.size} teacher(s) excluded</span>`:''}
+    rosterHtml += `<div class="no-break" style="margin-top:16px">
+      <div class="off-sec">📊 Teacher Duty Summary
+        ${excludedIds.size>0?`<span style="font-size:9pt;color:#dc2626;font-weight:400;margin-left:8px">(${excludedIds.size} teacher(s) excluded)</span>`:''}
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:#1B3A6B;color:#fff">
-          <th style="padding:7px 10px">Teacher</th>
-          <th style="padding:7px 10px">Phone</th>
-          <th style="padding:7px 10px;text-align:center">1st Half</th>
-          <th style="padding:7px 10px;text-align:center">2nd Half</th>
-          <th style="padding:7px 10px;text-align:center">Total</th>
-          <th style="padding:7px 10px">Acknowledgement</th>
+      <table class="off-table">
+        <thead><tr>
+          <th>Teacher's Name</th><th>Phone</th>
+          <th style="text-align:center">1st Half</th>
+          <th style="text-align:center">2nd Half</th>
+          <th style="text-align:center">Total Duties</th>
+          <th>Acknowledgement</th>
         </tr></thead>
         <tbody>${sumRows}</tbody>
       </table>
-    </div>
-    <div style="display:flex;justify-content:space-between;margin-top:50px">
-      <div style="text-align:center"><div style="border-top:1px solid #333;width:200px;padding-top:5px;font-size:12px;margin-top:40px">Exam Controller</div></div>
-      <div style="text-align:center"><div style="border-top:1px solid #333;width:200px;padding-top:5px;font-size:12px;margin-top:40px">Headmaster / Principal</div></div>
-    </div></div>`;
+    </div>`;
+
+    rosterHtml += offSignature('Exam Controller', '', principal, schoolName);
+    rosterHtml += offFooter(schoolName, `Invigilator Duty Roster — ${exam.name}`);
 
     showAlert(`✅ ${roster.length} duties assigned across ${roomNames.length} halls!`,'success');
-    printPreview(html, `Invigilator Roster — ${exam.name}`);
+    offPrint(rosterHtml, 'portrait', `Invigilator Roster — ${exam.name}`);
 }
 
 // Saved roster actions
@@ -5028,59 +5027,452 @@ async function generateAttendance() {
 
 // ── 6. EXPORT & SHARE ─────────────────────────────────────────────────────────
 async function renderExport(el) {
-    const exams = await DB.get('exams');
-    const eOpts = exams.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
-    el.innerHTML = `
-    <div class="page-title">📤 Export & Share</div>
-    <div class="card">
-      <div class="card-title">⚙️ Select Exam & Class</div>
-      <div class="form-row">
-        <div class="form-group"><label>Exam</label>
-          <select id="exExam" onchange="exLoadClasses()"><option value="">--Select--</option>${eOpts}</select>
+  const [exams, students, teachers, tts, seating, rosters, settings] = await Promise.all([
+    DB.get('exams'), DB.get('students'), DB.get('teachers'),
+    DB.get('examTimetables'), DB.get('seatingPlans'), DB.get('invigilatorRosters'),
+    DB.getObj('settings')
+  ]);
+  const eOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+
+  // Stats for each collection
+  const marks = await DB.get('marks').catch(()=>[]);
+  const halls  = await DB.get('halls').catch(()=>[]);
+  const ans    = await DB.get('answerScripts').catch(()=>[]);
+
+  const stats = [
+    {label:'Exams',       count:exams.length,    icon:'📋', key:'exams'},
+    {label:'Timetable',   count:tts.length,      icon:'📅', key:'examTimetables'},
+    {label:'Students',    count:students.length, icon:'👨‍🎓', key:'students'},
+    {label:'Teachers',    count:teachers.length, icon:'👩‍🏫', key:'teachers'},
+    {label:'Seating Plans',count:seating.length, icon:'🪑', key:'seatingPlans'},
+    {label:'Rosters',     count:rosters.length,  icon:'👮', key:'invigilatorRosters'},
+    {label:'Halls',       count:halls.length,    icon:'🏫', key:'halls'},
+    {label:'Marks',       count:marks.length,    icon:'📝', key:'marks'},
+    {label:'Answer Scripts',count:ans.length,    icon:'📦', key:'answerScripts'},
+  ];
+
+  el.innerHTML = `
+  <div class="page-title">🗄️ Data Hub
+    <span style="font-size:12px;font-weight:400;color:var(--text-2);margin-left:8px">Import · Export · Backup · Restore</span>
+  </div>
+  <div style="padding:0 24px 24px">
+
+    <!-- Stats bar -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:20px">
+      ${stats.map(s=>`
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:18px;margin-bottom:3px">${s.icon}</div>
+        <div style="font-size:18px;font-weight:800;color:var(--primary)">${s.count}</div>
+        <div style="font-size:10px;color:var(--text-2)">${s.label}</div>
+      </div>`).join('')}
+    </div>
+
+    <div class="tab-bar">
+      <button class="tab-pill active" onclick="dhTab('import',this)">📥 Excel Import</button>
+      <button class="tab-pill" onclick="dhTab('backup',this)">💾 Backup & Restore</button>
+      <button class="tab-pill" onclick="dhTab('export',this)">📤 Export Data</button>
+      <button class="tab-pill" onclick="dhTab('clear',this)">🗑️ Clear Data</button>
+    </div>
+
+    <!-- ══ IMPORT TAB ══ -->
+    <div id="dh-import" class="tab-panel active">
+      <div class="card" style="border-left:4px solid #f59e0b;margin-bottom:14px">
+        <div class="card-title">📥 Master Excel → EMS Import</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+          RHS_Master_Complete.xlsx upload করুন → সব data MongoDB-তে save হবে একসাথে
+        </p>
+        <div id="dh-upload-zone"
+          style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px"
+          ondragover="event.preventDefault();this.style.borderColor='#f59e0b'"
+          ondragleave="this.style.borderColor=''"
+          ondrop="dhDropFile(event)"
+          onclick="document.getElementById('dh-file-input').click()">
+          <input type="file" id="dh-file-input" accept=".xlsx,.xls" style="display:none" onchange="dhLoadFile(event)">
+          <div style="font-size:36px;margin-bottom:8px">📊</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:3px">Drop Excel here or click</div>
+          <div style="font-size:12px;color:var(--text-2)">RHS_Master_Complete.xlsx</div>
         </div>
-        <div class="form-group"><label>Class</label>
-          <select id="exClass"><option value="">All Classes</option></select>
+        <div id="dh-parse-status" style="font-size:12px;color:var(--text-2);margin-bottom:10px"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="dh-import-btn" disabled onclick="dhImportAll()">📤 Import to EMS (MongoDB)</button>
+          <button class="btn btn-secondary" id="dh-printonly-btn" disabled onclick="dhLoadFile_printOnly()">🖨️ Just Print (no import)</button>
+        </div>
+        <div id="dh-import-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+      </div>
+
+      <!-- Student import -->
+      <div class="card" style="border-left:4px solid #10b981">
+        <div class="card-title">👨‍🎓 Student List Import (আলাদা Excel)</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">
+          Columns: <code style="background:var(--bg);padding:1px 6px;border-radius:4px">Roll · Name · Class · Section</code>
+        </p>
+        <div id="dh-stu-zone"
+          style="border:2px dashed var(--border);border-radius:10px;padding:18px;text-align:center;cursor:pointer;margin-bottom:10px"
+          ondragover="event.preventDefault();this.style.borderColor='#10b981'"
+          ondragleave="this.style.borderColor=''"
+          ondrop="dhStuDrop(event)"
+          onclick="document.getElementById('dh-stu-input').click()">
+          <input type="file" id="dh-stu-input" accept=".xlsx,.xls" style="display:none" onchange="dhStudentLoad(event)">
+          <div style="font-size:24px;margin-bottom:4px">👨‍🎓</div>
+          <div style="font-size:12px;font-weight:600">Student Excel upload করুন</div>
+        </div>
+        <div id="dh-stu-status" style="font-size:12px;color:var(--text-2);margin-bottom:8px"></div>
+        <button class="btn btn-success" id="dh-stu-btn" disabled onclick="dhImportStudents()"
+          style="background:#10b981;color:white;border:none">👨‍🎓 Import Students</button>
+      </div>
+    </div>
+
+    <!-- ══ BACKUP TAB ══ -->
+    <div id="dh-backup" class="tab-panel">
+      <!-- Backup -->
+      <div class="card" style="border-left:4px solid var(--primary);margin-bottom:14px">
+        <div class="card-title">💾 Full Backup — সব data JSON-এ download করুন</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+          EMS-এর সব data একটা JSON file-এ save হবে। যেকোনো সময় restore করতে পারবেন।
+        </p>
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#166534">
+          <strong>Backup-এ থাকবে:</strong><br>
+          ✅ Exams &nbsp;·&nbsp; ✅ Timetable (${tts.length} entries) &nbsp;·&nbsp;
+          ✅ Students (${students.length}) &nbsp;·&nbsp; ✅ Teachers (${teachers.length}) &nbsp;·&nbsp;
+          ✅ Seating Plans &nbsp;·&nbsp; ✅ Rosters &nbsp;·&nbsp; ✅ Halls &nbsp;·&nbsp;
+          ✅ Marks &nbsp;·&nbsp; ✅ Settings &nbsp;·&nbsp; ✅ Answer Scripts
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="dhBackupFull()">💾 Download Full Backup (.json)</button>
+          <button class="btn btn-secondary" onclick="dhBackupExcel()">📊 Download as Excel</button>
+        </div>
+        <div id="dh-backup-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+      </div>
+
+      <!-- Restore -->
+      <div class="card" style="border-left:4px solid #f59e0b">
+        <div class="card-title">🔄 Restore — Backup থেকে data ফিরিয়ে আনুন</div>
+        <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e">
+          ⚠️ <strong>সাবধান:</strong> Restore করলে বর্তমান data replace হবে। আগে backup নিন।
+        </div>
+        <div id="dh-restore-zone"
+          style="border:2px dashed var(--border);border-radius:10px;padding:24px;text-align:center;cursor:pointer;margin-bottom:10px"
+          ondragover="event.preventDefault();this.style.borderColor='#f59e0b'"
+          ondragleave="this.style.borderColor=''"
+          ondrop="dhRestoreDrop(event)"
+          onclick="document.getElementById('dh-restore-input').click()">
+          <input type="file" id="dh-restore-input" accept=".json" style="display:none" onchange="dhRestoreLoad(event)">
+          <div style="font-size:28px;margin-bottom:6px">🔄</div>
+          <div style="font-size:13px;font-weight:600">Backup JSON file drop করুন বা click করুন</div>
+        </div>
+        <div id="dh-restore-status" style="font-size:12px;color:var(--text-2);margin-bottom:8px"></div>
+        <button class="btn btn-warning" id="dh-restore-btn" disabled onclick="dhRestoreConfirm()">🔄 Restore Now</button>
+      </div>
+    </div>
+
+    <!-- ══ EXPORT TAB ══ -->
+    <div id="dh-export" class="tab-panel">
+      <div class="card">
+        <div class="card-title">📤 Individual Collection Export</div>
+        <div class="form-group" style="max-width:300px;margin-bottom:16px">
+          <label>Exam Filter (optional)</label>
+          <select id="dh-export-exam">
+            <option value="">All Exams</option>${eOpts}
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
+          ${[
+            ['students',        '👨‍🎓','Students List',      'Roll, Name, Class, Section'],
+            ['examTimetables',  '📅','Timetable',           'Date, Subject, Class, Time'],
+            ['teachers',        '👩‍🏫','Teachers',           'Name, Subject, Classes'],
+            ['seatingPlans',    '🪑','Seating Plans',       'Room-wise assignment'],
+            ['invigilatorRosters','👮','Duty Roster',       'Date, Room, Teacher'],
+            ['halls',           '🏫','Exam Halls',          'Room capacity'],
+            ['marks',           '📝','Marks Data',          'Student marks'],
+            ['answerScripts',   '📦','Answer Scripts',      'Distribution data'],
+            ['exams',           '📋','Exam List',           'All exam records'],
+          ].map(([key,icon,label,desc])=>`
+          <div class="tool-card" onclick="dhExportCollection('${key}')" style="cursor:pointer">
+            <div style="font-size:24px;margin-bottom:6px">${icon}</div>
+            <div class="tool-name" style="font-size:12px">${label}</div>
+            <div class="tool-desc" style="font-size:11px">${desc}</div>
+          </div>`).join('')}
         </div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;">
-      <div class="card" style="text-align:center;cursor:pointer" onclick="exportStudentsXLSX()">
-        <div style="font-size:36px;margin-bottom:10px">👨‍🎓</div>
-        <div style="font-weight:700;color:var(--primary)">Students List</div>
-        <div style="font-size:12px;color:#888;margin:6px 0">All student data</div>
-        <button class="btn btn-warning btn-sm">📊 Export Excel</button>
+
+    <!-- ══ CLEAR TAB ══ -->
+    <div id="dh-clear" class="tab-panel">
+      <div class="card">
+        <div class="card-title" style="color:#dc2626">🗑️ Clear / Reset Data</div>
+        <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#991b1b">
+          ⚠️ <strong>এই actions undo করা যাবে না।</strong> আগে backup নিন!
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${[
+            ['students',      '👨‍🎓','Clear All Students',    students.length],
+            ['examTimetables','📅','Clear Timetable',        tts.length],
+            ['seatingPlans',  '🪑','Clear Seating Plans',    seating.length],
+            ['invigilatorRosters','👮','Clear Rosters',      rosters.length],
+            ['marks',         '📝','Clear All Marks',        marks.length],
+          ].map(([key,icon,label,count])=>`
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">${icon}</span>
+              <div>
+                <div style="font-size:13px;font-weight:600">${label}</div>
+                <div style="font-size:11px;color:var(--text-2)">${count} records</div>
+              </div>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="dhClearCollection('${key}','${label}')">🗑️ Clear</button>
+          </div>`).join('')}
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:#fef2f2;border-radius:8px;border:1px solid #fca5a5">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#991b1b">🔴 Reset Entire EMS</div>
+              <div style="font-size:11px;color:#dc2626">সব data মুছে যাবে — fresh start</div>
+            </div>
+            <button class="btn btn-danger" onclick="dhResetAll()">⚠️ Reset All</button>
+          </div>
+        </div>
       </div>
-      <div class="card" style="text-align:center;cursor:pointer" onclick="exportMarksXLSX()">
-        <div style="font-size:36px;margin-bottom:10px">📝</div>
-        <div style="font-weight:700;color:var(--primary)">Marks Data</div>
-        <div style="font-size:12px;color:#888;margin:6px 0">All marks with grades</div>
-        <button class="btn btn-warning btn-sm">📊 Export Excel</button>
-      </div>
-      <div class="card" style="text-align:center;cursor:pointer" onclick="exportResultXLSX()">
-        <div style="font-size:36px;margin-bottom:10px">📊</div>
-        <div style="font-weight:700;color:var(--primary)">Result Summary</div>
-        <div style="font-size:12px;color:#888;margin:6px 0">Rank, total, pass/fail</div>
-        <button class="btn btn-warning btn-sm">📊 Export Excel</button>
-      </div>
-      <div class="card" style="text-align:center;cursor:pointer" onclick="exportTimetableXLSX()">
-        <div style="font-size:36px;margin-bottom:10px">📅</div>
-        <div style="font-weight:700;color:var(--primary)">Timetable</div>
-        <div style="font-size:12px;color:#888;margin:6px 0">Exam schedule data</div>
-        <button class="btn btn-warning btn-sm">📊 Export Excel</button>
-      </div>
-      <div class="card" style="text-align:center;cursor:pointer" onclick="whatsappShare('result')">
-        <div style="font-size:36px;margin-bottom:10px">📱</div>
-        <div style="font-weight:700;color:var(--primary)">WhatsApp Share</div>
-        <div style="font-size:12px;color:#888;margin:6px 0">Share result summary</div>
-        <button class="btn btn-info btn-sm">📱 Share Now</button>
-      </div>
-      <div class="card" style="text-align:center;cursor:pointer" onclick="whatsappShare('timetable')">
-        <div style="font-size:36px;margin-bottom:10px">📲</div>
-        <div style="font-weight:700;color:var(--primary)">Share Timetable</div>
-        <div style="font-size:12px;color:#888;margin:6px 0">Send exam schedule</div>
-        <button class="btn btn-info btn-sm">📱 Share Now</button>
-      </div>
-    </div>`;
+    </div>
+  </div>`;
+
+  window.dhTab = (tab,btn) => {
+    document.querySelectorAll('#dh-import,#dh-backup,#dh-export,#dh-clear').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.tab-pill').forEach(b=>b.classList.remove('active'));
+    document.getElementById('dh-'+tab).classList.add('active');
+    if(btn) btn.classList.add('active');
+  };
+
+  // ── File drop/load (reuse edProcessFile logic) ──
+  let _dhWb = null;
+  window.dhDropFile = (e) => { e.preventDefault(); document.getElementById('dh-upload-zone').style.borderColor=''; if(e.dataTransfer.files[0]) dhProcessFile(e.dataTransfer.files[0]); };
+  window.dhLoadFile = (e) => { if(e.target.files[0]) dhProcessFile(e.target.files[0]); };
+
+  window.dhProcessFile = (file) => {
+    const statusEl = document.getElementById('dh-parse-status');
+    if(statusEl) statusEl.textContent = '⏳ Parsing Excel...';
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        _dhWb = XLSX.read(ev.target.result, {type:'array', cellDates:false});
+        if(typeof edParseWorkbook === 'function') edParseWorkbook(_dhWb);
+        if(statusEl) statusEl.innerHTML = `✅ "<b>${file.name}</b>" parsed — ${_dhWb.SheetNames.length} sheets found`;
+        ['dh-import-btn','dh-printonly-btn'].forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=false; });
+        showAlert('Excel parsed! Click "Import to EMS".','success');
+      } catch(err) {
+        if(statusEl) statusEl.textContent = '❌ Error: '+err.message;
+        showAlert('Error: '+err.message,'error');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  window.dhImportAll = async () => {
+    if(!_dhWb){ showAlert('Upload Excel first.','error'); return; }
+    // Reuse the existing edImportToEMS logic by setting _edWb
+    window._edWb = _dhWb;
+    document.getElementById('dh-import-btn').disabled=true;
+    document.getElementById('dh-import-btn').textContent='⏳ Importing...';
+    try {
+      await edImportToEMS();
+      document.getElementById('dh-import-status').innerHTML='✅ Import complete! Refresh page to see updated counts.';
+    } catch(e) {
+      document.getElementById('dh-import-status').textContent='❌ '+e.message;
+    }
+    document.getElementById('dh-import-btn').disabled=false;
+    document.getElementById('dh-import-btn').textContent='📤 Import to EMS (MongoDB)';
+  };
+
+  window.dhLoadFile_printOnly = () => { showAlert('Data ready for printing!','success'); };
+
+  // Student import
+  let _dhStuWb = null;
+  window.dhStuDrop = (e) => { e.preventDefault(); document.getElementById('dh-stu-zone').style.borderColor=''; if(e.dataTransfer.files[0]) dhStudentProcess(e.dataTransfer.files[0]); };
+  window.dhStudentLoad = (e) => { if(e.target.files[0]) dhStudentProcess(e.target.files[0]); };
+
+  window.dhStudentProcess = (file) => {
+    const statusEl = document.getElementById('dh-stu-status');
+    if(statusEl) statusEl.textContent='⏳ Parsing...';
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try {
+        _dhStuWb=XLSX.read(ev.target.result,{type:'array'});
+        const ws=_dhStuWb.Sheets[_dhStuWb.SheetNames[0]];
+        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        let dataStart=1;
+        for(let i=0;i<rows.length;i++){
+          const r=rows[i].map(c=>String(c||'').toLowerCase());
+          if(r.some(c=>c.includes('roll'))&&r.some(c=>c.includes('name'))){dataStart=i+1;break;}
+        }
+        const count=rows.slice(dataStart).filter(r=>r[0]||r[1]).length;
+        if(statusEl) statusEl.innerHTML=`✅ <b>${count}</b> students found in "${file.name}"`;
+        const btn=document.getElementById('dh-stu-btn');if(btn) btn.disabled=false;
+      } catch(err) {
+        if(statusEl) statusEl.textContent='❌ '+err.message;
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  window.dhImportStudents = async () => {
+    if(!_dhStuWb){showAlert('Upload student Excel first.','error');return;}
+    window._edStuWb=_dhStuWb;
+    await edImportStudents();
+  };
+
+  // ── BACKUP ──────────────────────────────────────────────────────────────
+  window.dhBackupFull = async () => {
+    const btn=document.querySelector('#dh-backup button');
+    if(btn){btn.disabled=true;btn.textContent='⏳ Preparing...';}
+    try {
+      const collections=['exams','examTimetables','students','teachers',
+                         'seatingPlans','invigilatorRosters','halls','marks',
+                         'answerScripts','settings','circulars','classes'];
+      const backup={
+        version:'1.0', school:settings.schoolName||'RHS',
+        createdAt:new Date().toISOString(), collections:{}
+      };
+      for(const key of collections){
+        try {
+          backup.collections[key] = key==='settings'
+            ? await DB.getObj(key)
+            : await DB.get(key);
+        } catch(e){ backup.collections[key]=[]; }
+      }
+      const json=JSON.stringify(backup,null,2);
+      const blob=new Blob([json],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      const date=new Date().toISOString().split('T')[0];
+      a.href=url; a.download=`RHS_EMS_Backup_${date}.json`;
+      a.click(); URL.revokeObjectURL(url);
+      document.getElementById('dh-backup-status').innerHTML=
+        `✅ Backup downloaded! File: <b>RHS_EMS_Backup_${date}.json</b>`;
+      showAlert('✅ Backup downloaded!','success');
+    } catch(e){ showAlert('Backup error: '+e.message,'error'); }
+    if(btn){btn.disabled=false;btn.textContent='💾 Download Full Backup (.json)';}
+  };
+
+  window.dhBackupExcel = async () => {
+    const collections=['exams','examTimetables','students','teachers',
+                       'seatingPlans','invigilatorRosters','halls','marks'];
+    const wb2=XLSX.utils.book_new();
+    for(const key of collections){
+      try {
+        const data=await DB.get(key);
+        if(!data||!data.length) continue;
+        // Flatten nested objects
+        const flat=data.map(item=>{
+          const row={};
+          Object.entries(item).forEach(([k,v])=>{
+            if(typeof v==='object'&&v!==null&&!Array.isArray(v)) row[k]=JSON.stringify(v);
+            else if(Array.isArray(v)) row[k]=v.join(', ');
+            else row[k]=v;
+          });
+          return row;
+        });
+        const ws=XLSX.utils.json_to_sheet(flat);
+        XLSX.utils.book_append_sheet(wb2,ws,key.slice(0,31));
+      } catch(e){}
+    }
+    const date=new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb2,`RHS_EMS_Backup_${date}.xlsx`);
+    showAlert('✅ Excel backup downloaded!','success');
+  };
+
+  // ── RESTORE ──────────────────────────────────────────────────────────────
+  let _dhRestoreData=null;
+  window.dhRestoreDrop=(e)=>{e.preventDefault();document.getElementById('dh-restore-zone').style.borderColor='';if(e.dataTransfer.files[0])dhRestoreProcess(e.dataTransfer.files[0]);};
+  window.dhRestoreLoad=(e)=>{if(e.target.files[0])dhRestoreProcess(e.target.files[0]);};
+
+  window.dhRestoreProcess=(file)=>{
+    const statusEl=document.getElementById('dh-restore-status');
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try {
+        const data=JSON.parse(ev.target.result);
+        if(!data.collections) throw new Error('Invalid backup file');
+        _dhRestoreData=data;
+        const keys=Object.keys(data.collections);
+        const counts=keys.map(k=>{
+          const v=data.collections[k];
+          return `${k}: ${Array.isArray(v)?v.length:'1 object'}`;
+        }).join(' · ');
+        if(statusEl) statusEl.innerHTML=`✅ Backup from <b>${data.createdAt?.split('T')[0]||'unknown'}</b><br><small>${counts}</small>`;
+        const btn=document.getElementById('dh-restore-btn');if(btn) btn.disabled=false;
+        showAlert('Backup file loaded! Click "Restore Now".','success');
+      } catch(e){
+        if(statusEl) statusEl.textContent='❌ Invalid backup file: '+e.message;
+        showAlert('Invalid file.','error');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  window.dhRestoreConfirm=async()=>{
+    if(!_dhRestoreData){showAlert('Load backup file first.','error');return;}
+    if(!confirm(`⚠️ Restore from ${_dhRestoreData.createdAt?.split('T')[0]}?\n\nএটা বর্তমান সব data replace করবে!\n\nContinue?`)) return;
+    const btn=document.getElementById('dh-restore-btn');
+    if(btn){btn.disabled=true;btn.textContent='⏳ Restoring...';}
+    try {
+      const cols=_dhRestoreData.collections;
+      const promises=Object.entries(cols).map(([key,val])=>{
+        if(key==='settings') return DB.setObj(key,val);
+        if(Array.isArray(val)) return DB.set(key,val);
+        return Promise.resolve();
+      });
+      await Promise.all(promises);
+      // Invalidate all cache
+      Object.keys(cols).forEach(key=>DB.invalidate(key));
+      document.getElementById('dh-restore-status').innerHTML='✅ Restore complete! Page refresh করুন।';
+      showAlert('✅ Data restored! Refreshing...','success');
+      setTimeout(()=>renderExport(document.getElementById('mainContent')),1500);
+    } catch(e){
+      showAlert('Restore error: '+e.message,'error');
+    }
+    if(btn){btn.disabled=false;btn.textContent='🔄 Restore Now';}
+  };
+
+  // ── EXPORT COLLECTION ──────────────────────────────────────────────────
+  window.dhExportCollection=async(key)=>{
+    const examId=document.getElementById('dh-export-exam')?.value||'';
+    let data=await DB.get(key).catch(()=>[]);
+    if(!data.length){showAlert('No data in '+key,'warning');return;}
+    if(examId) data=data.filter(d=>!d.examId||String(d.examId)===String(examId));
+    if(!data.length){showAlert('No data for selected exam.','warning');return;}
+    const flat=data.map(item=>{
+      const row={};
+      Object.entries(item).forEach(([k,v])=>{
+        if(typeof v==='object'&&v!==null&&!Array.isArray(v)) row[k]=JSON.stringify(v);
+        else if(Array.isArray(v)) row[k]=v.join(' | ');
+        else row[k]=v;
+      });
+      return row;
+    });
+    const ws=XLSX.utils.json_to_sheet(flat);
+    const wb2=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb2,ws,key.slice(0,31));
+    XLSX.writeFile(wb2,`RHS_${key}.xlsx`);
+    showAlert(`✅ ${data.length} records exported!`,'success');
+  };
+
+  // ── CLEAR ──────────────────────────────────────────────────────────────
+  window.dhClearCollection=async(key,label)=>{
+    if(!confirm(`Delete ALL ${label}? এটা undo করা যাবে না!`)) return;
+    await DB.set(key,[]);
+    DB.invalidate(key);
+    showAlert(`✅ ${label} cleared.`,'success');
+    renderExport(document.getElementById('mainContent'));
+  };
+
+  window.dhResetAll=async()=>{
+    if(!confirm('⚠️ সব data DELETE হবে!\n\nআগে backup নিয়েছেন? Continue করবেন?')) return;
+    if(!confirm('সত্যিই sure? এই action undo করা যাবে না।')) return;
+    const keys=['exams','examTimetables','students','teachers','seatingPlans',
+                'invigilatorRosters','halls','marks','answerScripts','circulars',
+                'classes','admitData','results'];
+    await Promise.all(keys.map(k=>DB.set(k,[])));
+    keys.forEach(k=>DB.invalidate(k));
+    showAlert('✅ EMS reset complete. Redirecting...','success');
+    setTimeout(()=>showPage('dashboard'),1500);
+  };
 }
 
 async function exLoadClasses() {
@@ -5196,32 +5588,320 @@ async function whatsappShare(type, roll='') {
 }
 
 // ── PRINT PREVIEW ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// OFFICIAL PRINT SYSTEM — সরকারি document মান
+// সব print এই function দিয়ে যাবে
+// ══════════════════════════════════════════════════════════════════════════════
+const OFF_PRINT_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,600;0,700;1,400&family=Noto+Sans:wght@400;500;600;700&display=swap');
+
+*  { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:'Noto Sans','Arial',sans-serif; background:white; color:#0F1E35; }
+
+/* ── Page setup ── */
+@page          { size:A4 portrait;  margin:15mm 14mm 18mm 14mm; }
+@page landscape{ size:A4 landscape; margin:12mm 12mm 16mm 12mm; }
+@page .land    { size:A4 landscape; margin:12mm 12mm 16mm 12mm; }
+
+@media print {
+  *   { -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; }
+  .pg { page-break-after:always; page-break-inside:avoid; }
+  .pg:last-child { page-break-after:avoid; }
+  .land { page:landscape; }
+  .no-break { page-break-inside:avoid; }
+}
+
+/* ── Official page wrapper ── */
+.pg {
+  font-family:'Noto Sans','Arial',sans-serif;
+  font-size:10.5pt;
+  line-height:1.5;
+  color:#0F1E35;
+  background:white;
+  padding:0;
+}
+
+/* ── Official header (like govt letterhead) ── */
+.off-hdr {
+  border-bottom:3px double #1B3A6B;
+  padding-bottom:10px;
+  margin-bottom:12px;
+  text-align:center;
+}
+.off-hdr .school-name {
+  font-family:'Noto Serif','Georgia',serif;
+  font-size:16pt;
+  font-weight:700;
+  color:#1B3A6B;
+  letter-spacing:0.5px;
+  line-height:1.2;
+}
+.off-hdr .school-info {
+  font-size:8pt;
+  color:#475569;
+  margin-top:3px;
+  line-height:1.6;
+}
+.off-hdr .doc-title {
+  font-size:12pt;
+  font-weight:700;
+  color:#2C4F8C;
+  margin-top:6px;
+  text-transform:uppercase;
+  letter-spacing:0.8px;
+}
+.off-hdr .doc-sub {
+  font-size:9.5pt;
+  color:#475569;
+  margin-top:2px;
+}
+
+/* ── Memo line (No. / Date) ── */
+.memo-line {
+  display:flex;
+  justify-content:space-between;
+  font-size:9.5pt;
+  color:#334155;
+  margin-bottom:10px;
+  border-bottom:0.5px solid #CBD5E1;
+  padding-bottom:6px;
+}
+
+/* ── Official table ── */
+.off-table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:10pt;
+  margin-bottom:12px;
+}
+.off-table th {
+  background:#1B3A6B;
+  color:white;
+  padding:7px 10px;
+  font-weight:600;
+  font-size:9.5pt;
+  border:1px solid #0F2850;
+  text-align:left;
+  white-space:nowrap;
+}
+.off-table td {
+  padding:6px 10px;
+  border:1px solid #B0C4DE;
+  vertical-align:middle;
+  font-size:10pt;
+}
+.off-table tr:nth-child(even) td { background:#F4F8FF; }
+.off-table tr:nth-child(odd)  td { background:#EAF2FF; }
+.off-table .total-row td {
+  background:#DCE9F8;
+  font-weight:700;
+  color:#1B3A6B;
+  font-size:10.5pt;
+  border-top:2px solid #1B3A6B;
+}
+.off-table .section-hdr td {
+  background:#2C4F8C;
+  color:white;
+  font-weight:700;
+  font-size:10pt;
+  padding:5px 10px;
+}
+
+/* ── Section heading ── */
+.off-sec {
+  background:#DCE9F8;
+  border-left:4px solid #1B3A6B;
+  padding:5px 12px;
+  font-weight:700;
+  font-size:10.5pt;
+  color:#1B3A6B;
+  margin:12px 0 8px;
+}
+
+/* ── Info box (highlighted block) ── */
+.off-info {
+  border:1px solid #B0C4DE;
+  border-radius:0;
+  padding:8px 12px;
+  background:#F8FAFD;
+  margin-bottom:10px;
+  font-size:10pt;
+}
+.off-info table { width:100%; border-collapse:collapse; }
+.off-info td    { padding:3px 8px; font-size:10pt; vertical-align:top; }
+.off-info .lbl  { color:#475569; width:38%; font-weight:500; }
+.off-info .val  { font-weight:600; color:#0F1E35; }
+
+/* ── Signature block ── */
+.off-sig {
+  display:flex;
+  justify-content:space-between;
+  margin-top:32px;
+  font-size:10pt;
+}
+.off-sig .sig-box {
+  text-align:center;
+  min-width:160px;
+}
+.off-sig .sig-line {
+  border-top:1px solid #334155;
+  padding-top:5px;
+  margin-top:36px;
+  font-size:9.5pt;
+  color:#334155;
+}
+.off-sig .sig-name {
+  font-weight:700;
+  font-size:10pt;
+  color:#1B3A6B;
+}
+
+/* ── Footer ── */
+.off-foot {
+  border-top:1px solid #B0C4DE;
+  margin-top:14px;
+  padding-top:5px;
+  font-size:8pt;
+  color:#94A3B8;
+  display:flex;
+  justify-content:space-between;
+}
+
+/* ── Status badges ── */
+.badge-present { background:#d1fae5; color:#065f46; padding:1px 7px; border-radius:3px; font-size:9pt; font-weight:600; }
+.badge-absent  { background:#fee2e2; color:#991b1b; padding:1px 7px; border-radius:3px; font-size:9pt; font-weight:600; }
+.badge-late    { background:#fef3c7; color:#92400e; padding:1px 7px; border-radius:3px; font-size:9pt; font-weight:600; }
+
+/* ── Gold accent ── */
+.gold-bar { height:3px; background:#C9A84C; margin:0 0 8px; }
+.navy-bar  { height:2px; background:#1B3A6B; margin:8px 0; }
+`;
+
+/**
+ * offPrint(pages, orientation, title)
+ * pages = HTML string বা array of HTML strings (প্রতিটা আলাদা page)
+ * orientation = 'portrait' | 'landscape'
+ * title = document title
+ */
+function offPrint(pages, orientation='portrait', title='Document') {
+  const pagesArr = Array.isArray(pages) ? pages : [pages];
+  const isLand   = orientation==='landscape';
+  const pageSize = isLand ? 'A4 landscape' : 'A4 portrait';
+  const margin   = isLand ? '12mm 12mm 16mm 12mm' : '15mm 14mm 18mm 14mm';
+
+  // Wrap each page
+  const body = pagesArr.map((html,i) =>
+    `<div class="pg${isLand?' land':''}${i===pagesArr.length-1?' last':''}">${html}</div>`
+  ).join('\n');
+
+  const pw = window.open('','_blank',`width=${isLand?1100:820},height=920`);
+  if(!pw){ showAlert('Popup blocked! Allow popups for this site.','error'); return; }
+
+  pw.document.write(`<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<title>${title}</title>
+<style>
+${OFF_PRINT_CSS}
+@page { size:${pageSize}; margin:${margin}; }
+</style>
+</head>
+<body>${body}
+<script>
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(()=>{ setTimeout(()=>{ window.print(); }, 400); });
+} else {
+  setTimeout(()=>{ window.print(); }, 900);
+}
+<\/script>
+</body></html>`);
+  pw.document.close();
+}
+
+/**
+ * offHeader(school, examTitle, docTitle, docSub, memoNo, date)
+ * সব official document-এর shared header
+ */
+function offHeader(school, examTitle, docTitle, docSub='', memoNo='', date='') {
+  const dise   = '19250206103';
+  const hsCode = '04178';
+  const phone  = '(03452) 252271';
+  const addr   = 'P.O.- Uttar Ramnagar, P.S.: Aushgram, Dist.: Purba Bardhaman';
+  const today  = date || new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
+
+  return `
+  <div class="off-hdr">
+    <div class="school-name">${school}</div>
+    <div class="school-info">
+      Index No.: H-1/174 &nbsp;|&nbsp; DISE Code: ${dise} &nbsp;|&nbsp;
+      H.S. Code: ${hsCode} &nbsp;|&nbsp; Ph.: ${phone}<br>
+      ${addr}
+    </div>
+    <div class="gold-bar" style="margin:6px 0 4px"></div>
+    <div class="doc-title">${docTitle}</div>
+    ${docSub?`<div class="doc-sub">${docSub}</div>`:''}
+    ${examTitle?`<div class="doc-sub" style="font-weight:600;color:#1B3A6B;margin-top:3px">${examTitle}</div>`:''}
+  </div>
+  ${memoNo||date?`<div class="memo-line">
+    <span>Memo No.: <strong>${memoNo||'—'}</strong></span>
+    <span>Date: <strong>${today}</strong></span>
+  </div>`:''}`;
+}
+
+/**
+ * offFooter(school, docTitle, pageNum)
+ */
+function offFooter(school, docTitle='', pageNum='') {
+  const today = new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
+  return `<div class="off-foot">
+    <span>${school}</span>
+    <span>${docTitle}</span>
+    <span>Date: ${today}${pageNum?' | Page '+pageNum:''}</span>
+  </div>`;
+}
+
+/**
+ * offSignature(left, right, principal)
+ */
+function offSignature(left='Exam Controller', right='', principal='Dasarath Bagdi', school='') {
+  const r = right || `${principal}<br><span style="font-size:9pt;color:#475569">Head of Institution${school?', '+school:''}</span>`;
+  return `<div class="off-sig">
+    <div class="sig-box">
+      <div class="sig-line">${left}</div>
+    </div>
+    <div class="sig-box">
+      <div class="sig-line">${r}</div>
+    </div>
+  </div>`;
+}
+
+// ── Upgrade printPreview to use official print ────────────────────────────────
 function printPreview(html, title='Print') {
-    const modal = document.createElement('div');
-    modal.className='modal-overlay';
-    modal.style.zIndex='99999';
-    modal.innerHTML=`
-    <div style="background:#fff;border-radius:14px;width:95%;max-width:820px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 25px 60px rgba(0,0,0,0.4)">
-      <div style="background:var(--primary);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
-        <span style="font-weight:700;font-size:15px">👁️ Print Preview — ${title}</span>
-        <div style="display:flex;gap:10px">
-          <button onclick="this.closest('.modal-overlay').querySelector('iframe').contentWindow.print()"
-            style="padding:7px 16px;background:#43a047;border:none;color:#fff;border-radius:7px;font-weight:700;cursor:pointer">🖨️ Print</button>
-          <button onclick="this.closest('.modal-overlay').remove()"
-            style="padding:7px 14px;background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:7px;cursor:pointer">✕ Close</button>
-        </div>
+  // Show preview modal then print officially
+  const modal = document.createElement('div');
+  modal.className='modal-overlay';
+  modal.style.zIndex='99999';
+  modal.innerHTML=`
+  <div style="background:var(--card);border-radius:14px;width:95%;max-width:900px;max-height:94vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 25px 60px rgba(0,0,0,0.4)">
+    <div style="background:#1B3A6B;color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
+      <span style="font-weight:700;font-size:14px">👁️ Preview — ${title}</span>
+      <div style="display:flex;gap:8px">
+        <button onclick="offPrint(document.getElementById('_ppHtml').innerHTML,'portrait','${title}')"
+          style="padding:6px 14px;background:#059669;border:none;color:#fff;border-radius:6px;font-weight:700;cursor:pointer;font-family:inherit">🖨️ Official Print</button>
+        <button onclick="offPrint(document.getElementById('_ppHtml').innerHTML,'landscape','${title}')"
+          style="padding:6px 14px;background:#2563eb;border:none;color:#fff;border-radius:6px;font-weight:600;cursor:pointer;font-family:inherit">🖨️ Landscape</button>
+        <button onclick="this.closest('.modal-overlay').remove()"
+          style="padding:6px 12px;background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:6px;cursor:pointer">✕</button>
       </div>
-      <iframe id="previewIframe" style="flex:1;border:none;background:#eee;"></iframe>
-    </div>`;
-    document.body.appendChild(modal);
-    modal.addEventListener('click',e=>{ if(e.target===modal) modal.remove(); });
-    const iframe=modal.querySelector('iframe');
-    const doc=iframe.contentDocument||iframe.contentWindow.document;
-    doc.open();
-    doc.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;padding:20px;background:#fff;}
-    @media print{body{padding:6px;}}</style></head><body>${html}</body></html>`);
-    doc.close();
+    </div>
+    <div style="flex:1;overflow-y:auto;background:#f1f5f9;padding:16px">
+      <div id="_ppHtml" style="background:white;max-width:780px;margin:0 auto;padding:20px;box-shadow:0 2px 12px rgba(0,0,0,.1);min-height:400px">
+        ${html}
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{ if(e.target===modal) modal.remove(); });
 }
 
 // ── DARK MODE ────────────────────────────────────────────────────────────────
@@ -6944,103 +7624,63 @@ async function renderCircular(el) {
     const examTT = tts.filter(t=>String(t.examId)===String(examId)).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
     const sch    = settings2.schoolName||school;
     const prin   = settings2.principalName||principal;
-    const dise   = settings2.schoolCode||'19250206103';
     const crNo   = document.getElementById('cr-no').value;
     const crDate = document.getElementById('cr-date').value;
     const subj   = document.getElementById('cr-subject').value;
     const extra  = document.getElementById('cr-extra').value;
     const to     = document.getElementById('cr-to').value;
 
-    // Group timetable by session/class groups
     const classes = [...new Set(examTT.map(t=>t.className||''))].filter(Boolean).sort();
     const ttByClass = {};
-    classes.forEach(cls=>{
-      ttByClass[cls] = examTT.filter(t=>t.className===cls);
-    });
+    classes.forEach(cls=>{ ttByClass[cls] = examTT.filter(t=>t.className===cls); });
 
     const ttHtml = Object.entries(ttByClass).map(([cls,rows])=>`
-      <div style="margin-bottom:10px">
-        <div style="background:#DCE9F8;padding:5px 10px;font-weight:700;color:#1B3A6B;font-size:10.5pt;border-left:3px solid #1B3A6B">Class ${cls}</div>
-        <table style="width:100%;border-collapse:collapse;font-size:10pt">
-          <thead><tr style="background:#2C4F8C;color:white">
-            <th style="padding:5px 8px;text-align:left">Date</th>
-            <th style="padding:5px 8px;text-align:left">Day</th>
-            <th style="padding:5px 8px;text-align:left">Subject</th>
-            <th style="padding:5px 8px;text-align:left">Time</th>
-            <th style="padding:5px 8px;text-align:center">Marks</th>
+      <div class="no-break" style="margin-bottom:10px">
+        <div class="off-sec">Class ${cls}</div>
+        <table class="off-table">
+          <thead><tr>
+            <th>Date</th><th>Day</th><th>Subject</th><th>Time</th><th style="text-align:center">Marks</th>
           </tr></thead>
-          <tbody>${rows.map((r,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
-            <td style="padding:5px 8px;border:1px solid #B0C4DE;font-weight:600;color:#1B3A6B">${r.date||'—'}</td>
-            <td style="padding:5px 8px;border:1px solid #B0C4DE">${r.day||'—'}</td>
-            <td style="padding:5px 8px;border:1px solid #B0C4DE;font-weight:700">${r.subject||'—'}</td>
-            <td style="padding:5px 8px;border:1px solid #B0C4DE">${r.time||r.startTime||'—'}</td>
-            <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center">${r.maxMarks||'—'}</td>
+          <tbody>${rows.map((r,i)=>`<tr>
+            <td style="font-weight:600;color:#1B3A6B">${r.date||'—'}</td>
+            <td>${r.day||'—'}</td>
+            <td style="font-weight:700">${r.subject||'—'}</td>
+            <td>${r.time||r.startTime||'—'}</td>
+            <td style="text-align:center">${r.maxMarks||'—'}</td>
           </tr>`).join('')}</tbody>
         </table>
       </div>`).join('');
 
-    return `<div style="font-family:Arial,sans-serif;padding:24px;background:white">
-      <!-- Header -->
-      <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:14px;margin-bottom:16px">
-        <div style="font-size:18pt;font-weight:700;color:#1B3A6B;letter-spacing:0.5px">${sch}</div>
-        <div style="font-size:9pt;color:#475569;margin-top:2px">DISE: ${dise}</div>
-      </div>
-      <!-- Circular Info -->
-      <div style="display:flex;justify-content:space-between;font-size:10.5pt;margin-bottom:14px">
-        <div>Memo No.: <strong>${crNo||'___/2026'}</strong></div>
-        <div>Date: <strong>${crDate}</strong></div>
-      </div>
-      <div style="font-size:10.5pt;margin-bottom:6px"><strong>To:</strong> ${to}</div>
-      <div style="font-size:11pt;font-weight:700;color:#1B3A6B;margin-bottom:14px;border-bottom:1px solid #B0C4DE;padding-bottom:6px">
-        Sub: ${subj}
-      </div>
-      <!-- Body -->
-      <div style="font-size:10.5pt;line-height:1.8;margin-bottom:14px">
-        This is to inform all concerned that the <strong>${exam?.name||''}</strong> for the Academic Year ${exam?.year||'2026'} will be held as per the schedule given below. All students are requested to note the examination dates and come prepared accordingly.
-      </div>
-      <!-- Timetable -->
-      <div style="margin-bottom:16px">${ttHtml}</div>
-      ${extra?`<div style="font-size:10.5pt;line-height:1.8;margin-bottom:14px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:10px 14px">
-        <strong>Note:</strong> ${extra}
-      </div>`:''}
-      <!-- Instructions -->
-      <div style="font-size:10.5pt;margin-bottom:14px">
+    return offHeader(sch, `${exam?.name||''} — ${exam?.year||''}`, 'EXAMINATION CIRCULAR', subj, crNo, crDate) +
+      `<div style="font-size:10.5pt;margin-bottom:8px"><strong>To:</strong> ${to}</div>
+      <div class="navy-bar"></div>
+      <p style="font-size:10.5pt;line-height:1.9;margin-bottom:12px;text-align:justify">
+        This is to inform all concerned that the <strong>${exam?.name||''}</strong> for the
+        Academic Year <strong>${exam?.year||'2026'}</strong> will be held as per the schedule
+        given below. All students are requested to note the examination dates carefully.
+      </p>
+      ${ttHtml}
+      ${extra?`<div class="off-info" style="margin-top:10px"><strong>Note:</strong> ${extra}</div>`:''}
+      <div style="font-size:10.5pt;margin:12px 0">
         <strong>Important Instructions:</strong>
-        <ol style="margin-left:20px;line-height:2;margin-top:4px">
+        <ol style="margin-left:22px;line-height:2.1;margin-top:4px;font-size:10pt">
           <li>Students must carry their Admit Card on all examination days.</li>
-          <li>Students must report to the examination hall at least 15 minutes before the scheduled time.</li>
-          <li>Use of mobile phones and electronic devices is strictly prohibited inside the examination hall.</li>
-          <li>Any form of unfair means will result in cancellation of the examination.</li>
+          <li>Report to the examination hall at least <strong>15 minutes</strong> before scheduled time.</li>
+          <li>Mobile phones and electronic devices are <strong>strictly prohibited</strong>.</li>
+          <li>Any unfair means will result in immediate cancellation of examination.</li>
         </ol>
-      </div>
-      <!-- Signature -->
-      <div style="display:flex;justify-content:space-between;margin-top:40px">
-        <div style="text-align:center">
-          <div style="border-top:1px solid #374151;width:180px;padding-top:5px;font-size:10pt;color:#374151;margin-top:40px">Class Teacher / In-charge</div>
-        </div>
-        <div style="text-align:center">
-          <div style="font-size:10pt;color:#374151;margin-bottom:3px">${prin}</div>
-          <div style="border-top:1px solid #374151;width:200px;padding-top:5px;font-size:10pt;color:#374151;margin-top:36px">Head of Institution<br><small style="color:#64748B">${sch}</small></div>
-        </div>
-      </div>
-    </div>`;
+      </div>` +
+      offSignature('Class Teacher / In-charge', '', prin, sch) +
+      offFooter(sch, 'Examination Circular');
   };
 
   window.crPrint = async (type) => {
     let html = '';
-    if(type==='exam') {
-      html = await crBuildExamCircular();
-    } else if(type==='duty') {
-      html = await crBuildDutyNotice();
-    } else if(type==='general') {
-      html = crBuildGeneralNotice();
-    }
+    if(type==='exam')    html = await crBuildExamCircular();
+    else if(type==='duty')    html = await crBuildDutyNotice();
+    else if(type==='general') html = crBuildGeneralNotice();
     if(!html) return;
-    const w=window.open('','_blank','width=800,height=700');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <style>*{margin:0;padding:0;box-sizing:border-box}@page{size:A4;margin:14mm}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>
-    </head><body>${html}<script>setTimeout(()=>{window.print();},400);<\/script></body></html>`);
-    w.document.close();
+    offPrint(html, 'portrait', type==='exam'?'Exam Circular':type==='duty'?'Duty Notice':'General Circular');
   };
 
   window.crBuildDutyNotice = async () => {
@@ -7210,6 +7850,728 @@ async function renderCircular(el) {
     }
     if(!msg){showAlert('Fill in the fields first.','error');return;}
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LIVE ROOM DIARY — Exam-দিন real-time attendance mark করুন
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderLiveDiary(el) {
+  const [exams, tts, seatingPlans, rosters, settings] = await Promise.all([
+    DB.get('exams'), DB.get('examTimetables'),
+    DB.get('seatingPlans'), DB.get('invigilatorRosters'), DB.getObj('settings')
+  ]);
+  const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+  const school   = settings.schoolName||'Ramnagar High School (H.S.)';
+
+  // Today's date in dd-mm-yyyy
+  const now = new Date();
+  const todayDD = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
+
+  el.innerHTML = `
+  <div class="page-title">📓 Live Room Diary
+    <span style="font-size:12px;font-weight:400;color:var(--text-2);margin-left:8px">পরীক্ষার দিন real-time attendance</span>
+  </div>
+  <div style="padding:0 24px 24px">
+
+    <!-- Config -->
+    <div class="card" style="margin-bottom:14px">
+      <div class="form-row">
+        <div class="form-group"><label>Exam *</label>
+          <select id="ld-exam" onchange="ldLoad()">
+            <option value="">--Select--</option>${examOpts}
+          </select>
+        </div>
+        <div class="form-group"><label>Date</label>
+          <input id="ld-date" value="${todayDD}" placeholder="dd-mm-yyyy" oninput="ldLoad()">
+        </div>
+        <div class="form-group"><label>Session</label>
+          <select id="ld-sess" onchange="ldLoad()">
+            <option value="1st Half">1st Half (11:00 AM)</option>
+            <option value="2nd Half">2nd Half (1:00 PM)</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Room</label>
+          <select id="ld-room" onchange="ldLoadRoom()">
+            <option value="">--Select Room--</option>
+          </select>
+        </div>
+      </div>
+      <div id="ld-info" style="font-size:12px;color:var(--text-2)"></div>
+    </div>
+
+    <!-- Live Attendance Panel -->
+    <div id="ld-panel">
+      <div style="text-align:center;padding:40px;color:var(--text-2)">
+        <div style="font-size:32px;margin-bottom:10px">📓</div>
+        Exam ও Room select করুন
+      </div>
+    </div>
+  </div>`;
+
+  // ── Load rooms for selected exam+date+session ──
+  window.ldLoad = async () => {
+    const examId = document.getElementById('ld-exam').value;
+    const date   = document.getElementById('ld-date').value;
+    const sess   = document.getElementById('ld-sess').value;
+    if(!examId) return;
+
+    const sp = seatingPlans.find(p=>String(p.examId)===String(examId));
+    const roomSel = document.getElementById('ld-room');
+
+    if(sp && sp.plan) {
+      const rooms = [...new Set(sp.plan.map(p=>p.roomName||p.roomNo||''))].filter(Boolean)
+        .sort((a,b)=>parseInt(a.replace(/\D/g,''))-parseInt(b.replace(/\D/g,'')));
+      roomSel.innerHTML = '<option value="">--Select Room--</option>' +
+        rooms.map(r=>`<option value="${r}">${r}</option>`).join('');
+    } else {
+      roomSel.innerHTML = '<option value="">No seating plan found</option>';
+    }
+
+    // Subject info
+    const subj = tts.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===sess)
+                    .map(t=>t.subject).filter(Boolean);
+    const infoEl = document.getElementById('ld-info');
+    if(infoEl) infoEl.innerHTML = subj.length
+      ? `📚 Today's subject: <strong>${[...new Set(subj)].join(', ')}</strong>`
+      : `📚 No timetable entry found for ${date} ${sess}`;
+  };
+
+  // ── Load room attendance panel ──
+  window.ldLoadRoom = async () => {
+    const examId = document.getElementById('ld-exam').value;
+    const date   = document.getElementById('ld-date').value;
+    const sess   = document.getElementById('ld-sess').value;
+    const room   = document.getElementById('ld-room').value;
+    if(!examId || !room) return;
+
+    const sp       = seatingPlans.find(p=>String(p.examId)===String(examId));
+    const roster   = rosters.find(r=>String(r.examId)===String(examId));
+    const examObj  = exams.find(e=>String(e.id)===String(examId));
+
+    // Get students for this room+session
+    const roomPlan = sp?.plan?.filter(p=>(p.roomName||p.roomNo||'')===room) || [];
+    const sessKey  = sess.includes('2nd') ? '2nd Half' : '1st Half';
+    const sessData = roomPlan.filter(p=>(p.half||'').includes(sessKey.split(' ')[0]));
+
+    // Subject & invigilator
+    const subjList = tts.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===sess)
+                        .map(t=>t.subject).filter(Boolean);
+    const invList  = roster?.roster?.filter(r=>r.date===date&&r.hall===room&&
+                       (r.session===sess||r.half===(sess.includes('2nd')?'2H':'1H')))
+                     .map(r=>r.teacherName) || [];
+
+    // Load saved attendance
+    const savedKey = `att_${examId}_${date}_${sess}_${room}`;
+    const saved    = JSON.parse(localStorage.getItem(savedKey)||'{}');
+
+    const panel = document.getElementById('ld-panel');
+
+    // Build student rows from seating plan rolls
+    let studentRows = '';
+    let totalAssigned = 0;
+
+    if(sessData.length) {
+      sessData.forEach(sec => {
+        const rollsStr = sec.rolls||sec.rollNumbers||'';
+        // Parse roll ranges like "1–25, 27–30"
+        const rolls = [];
+        rollsStr.split(',').forEach(part => {
+          part = part.trim();
+          const m = part.match(/(\d+)\s*[–\-]\s*(\d+)/);
+          if(m) { for(let i=parseInt(m[1]);i<=parseInt(m[2]);i++) rolls.push(i); }
+          else if(/^\d+$/.test(part)) rolls.push(parseInt(part));
+        });
+
+        if(rolls.length) {
+          totalAssigned += rolls.length;
+          const secLabel = `Class ${sec.class||sec.className||''} ${sec.gender||''} Sec ${sec.section||sec.sec||''}`;
+          studentRows += `<tr><td colspan="5" style="padding:6px 10px;background:var(--border);font-weight:600;font-size:11px;color:var(--text-2)">${secLabel} — ${rolls.length} students</td></tr>`;
+          rolls.forEach((roll,i) => {
+            const aKey = `${sec.class||''}_${sec.section||sec.sec||''}_${roll}`;
+            const status = saved[aKey] || 'present';
+            const bg = status==='absent' ? '#fff1f2' : status==='late' ? '#fffbeb' : '';
+            studentRows += `<tr style="background:${bg}" id="ldr_${aKey}">
+              <td style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-2)">${i+1}</td>
+              <td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--primary)">${roll}</td>
+              <td style="padding:6px 10px;font-size:11px">Class ${sec.class||''} / Sec ${sec.section||sec.sec||''}</td>
+              <td style="padding:6px 10px">
+                <div style="display:flex;gap:4px">
+                  <button onclick="ldMark('${aKey}','present','${savedKey}')"
+                    style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
+                    background:${status==='present'?'#059669':'var(--bg)'};color:${status==='present'?'white':'var(--text)'};border-color:${status==='present'?'#059669':'var(--border)'}">
+                    ✓ Present
+                  </button>
+                  <button onclick="ldMark('${aKey}','absent','${savedKey}')"
+                    style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
+                    background:${status==='absent'?'#dc2626':'var(--bg)'};color:${status==='absent'?'white':'var(--text)'};border-color:${status==='absent'?'#dc2626':'var(--border)'}">
+                    ✗ Absent
+                  </button>
+                  <button onclick="ldMark('${aKey}','late','${savedKey}')"
+                    style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
+                    background:${status==='late'?'#d97706':'var(--bg)'};color:${status==='late'?'white':'var(--text)'};border-color:${status==='late'?'#d97706':'var(--border)'}">
+                    ⏰ Late
+                  </button>
+                </div>
+              </td>
+              <td style="padding:6px 10px;text-align:center">
+                <span id="ldst_${aKey}" style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;
+                  background:${status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5'};
+                  color:${status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46'}">
+                  ${status.charAt(0).toUpperCase()+status.slice(1)}
+                </span>
+              </td>
+            </tr>`;
+          });
+        }
+      });
+    } else {
+      studentRows = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-2)">
+        No seating data found for ${room} — ${sess}.<br>
+        <small>Import seating plan from Exam Docs page first.</small>
+      </td></tr>`;
+    }
+
+    // Count present/absent from saved
+    const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+    const present = counts.present||0;
+    const absent  = counts.absent ||0;
+    const late    = counts.late   ||0;
+    const marked  = present+absent+late;
+
+    panel.innerHTML = `
+    <!-- Header Card -->
+    <div class="card" style="margin-bottom:12px;border-left:4px solid var(--primary)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div>
+          <div style="font-size:18px;font-weight:700;color:var(--primary)">🚪 ${room}</div>
+          <div style="font-size:12px;color:var(--text-2);margin-top:2px">
+            ${date} · ${sess} · ${[...new Set(subjList)].join(', ')||'—'}
+          </div>
+          ${invList.length?`<div style="font-size:12px;color:var(--text-2);margin-top:2px">
+            👮 ${invList.join(' · ')}
+          </div>`:''}
+        </div>
+        <!-- Live Stats -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div id="ld-stat-total" style="text-align:center;background:#eff6ff;border-radius:8px;padding:8px 14px;min-width:70px">
+            <div style="font-size:22px;font-weight:800;color:#1d4ed8">${totalAssigned}</div>
+            <div style="font-size:10px;color:#3b82f6">Assigned</div>
+          </div>
+          <div id="ld-stat-present" style="text-align:center;background:#f0fdf4;border-radius:8px;padding:8px 14px;min-width:70px">
+            <div style="font-size:22px;font-weight:800;color:#059669" id="ld-cnt-present">${present}</div>
+            <div style="font-size:10px;color:#10b981">Present</div>
+          </div>
+          <div id="ld-stat-absent" style="text-align:center;background:#fef2f2;border-radius:8px;padding:8px 14px;min-width:70px">
+            <div style="font-size:22px;font-weight:800;color:#dc2626" id="ld-cnt-absent">${absent}</div>
+            <div style="font-size:10px;color:#ef4444">Absent</div>
+          </div>
+          <div id="ld-stat-late" style="text-align:center;background:#fffbeb;border-radius:8px;padding:8px 14px;min-width:70px">
+            <div style="font-size:22px;font-weight:800;color:#d97706" id="ld-cnt-late">${late}</div>
+            <div style="font-size:10px;color:#f59e0b">Late</div>
+          </div>
+        </div>
+      </div>
+      <!-- Mark All buttons -->
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-success btn-sm" onclick="ldMarkAll('present','${savedKey}','${totalAssigned}')">✓ Mark All Present</button>
+        <button class="btn btn-primary btn-sm" onclick="ldPrintDiary('${examId}','${date}','${sess}','${room}','${savedKey}')">🖨️ Print Room Diary</button>
+        <button class="btn btn-warning btn-sm" onclick="ldExportDiary('${examId}','${date}','${sess}','${room}','${savedKey}')">📊 Export Excel</button>
+        <div style="font-size:11px;color:var(--text-2);align-self:center;margin-left:auto">
+          💾 Auto-saved in browser
+        </div>
+      </div>
+    </div>
+
+    <!-- Attendance Table -->
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:40px">#</th>
+            <th style="width:80px">Roll</th>
+            <th>Class / Section</th>
+            <th>Mark Attendance</th>
+            <th style="width:80px">Status</th>
+          </tr></thead>
+          <tbody id="ld-tbody">${studentRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  };
+
+  // ── Mark attendance ──
+  window.ldMark = (key, status, savedKey) => {
+    const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
+    saved[key] = status;
+    localStorage.setItem(savedKey, JSON.stringify(saved));
+
+    // Update row background
+    const row = document.getElementById(`ldr_${key}`);
+    if(row) row.style.background = status==='absent'?'#fff1f2':status==='late'?'#fffbeb':'';
+
+    // Update status badge
+    const badge = document.getElementById(`ldst_${key}`);
+    if(badge) {
+      badge.textContent = status.charAt(0).toUpperCase()+status.slice(1);
+      badge.style.background = status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5';
+      badge.style.color = status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46';
+    }
+
+    // Update buttons in this row
+    const btns = row?.querySelectorAll('button');
+    if(btns) {
+      btns.forEach(btn => {
+        const s = btn.textContent.trim().toLowerCase().includes('present')?'present':btn.textContent.toLowerCase().includes('absent')?'absent':'late';
+        btn.style.background = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--bg)';
+        btn.style.color = s===status?'white':'var(--text)';
+        btn.style.borderColor = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--border)';
+      });
+    }
+
+    // Update counters
+    const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+    ['present','absent','late'].forEach(s=>{
+      const el = document.getElementById(`ld-cnt-${s}`);
+      if(el) el.textContent = counts[s]||0;
+    });
+  };
+
+  window.ldMarkAll = (status, savedKey, total) => {
+    const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
+    document.querySelectorAll('#ld-tbody tr[id^="ldr_"]').forEach(row => {
+      const key = row.id.replace('ldr_','');
+      saved[key] = status;
+    });
+    localStorage.setItem(savedKey, JSON.stringify(saved));
+    ldLoadRoom(); // Refresh
+    showAlert(`✅ All marked ${status}!`,'success');
+  };
+
+  window.ldPrintDiary = async (examId, date, sess, room, savedKey) => {
+    const saved   = JSON.parse(localStorage.getItem(savedKey)||'{}');
+    const exObj   = exams.find(e=>String(e.id)===String(examId));
+    const subjList= tts.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===sess).map(t=>t.subject);
+    const invList = rosters.find(r=>String(r.examId)===String(examId))?.roster
+                    ?.filter(r=>r.date===date&&r.hall===room).map(r=>r.teacherName)||[];
+    const counts  = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+
+    const rows = Object.entries(saved).map(([key,status],i)=>{
+      const [cls,sec,roll]=key.split('_');
+      return `<tr style="background:${status==='absent'?'#fff1f2':status==='late'?'#fffbeb':''}">
+        <td style="padding:6px 8px;border:1px solid #dde;text-align:center">${i+1}</td>
+        <td style="padding:6px 8px;border:1px solid #dde;font-weight:700;color:#1B3A6B">${roll}</td>
+        <td style="padding:6px 8px;border:1px solid #dde">Class ${cls} Sec ${sec}</td>
+        <td style="padding:6px 8px;border:1px solid #dde;text-align:center">
+          <span style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;
+            background:${status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5'};
+            color:${status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46'}">
+            ${status.toUpperCase()}
+          </span>
+        </td>
+        <td style="padding:6px 8px;border:1px solid #dde;width:100px"></td>
+      </tr>`;
+    }).join('');
+
+    const html = `<div style="font-family:Arial,sans-serif;padding:20px">
+      <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:12px;margin-bottom:14px">
+        <div style="font-size:17pt;font-weight:700;color:#1B3A6B">${school}</div>
+        <div style="font-size:12pt;font-weight:600;color:#2C4F8C;margin-top:3px">Room Diary — ${exObj?.name||''} ${exObj?.year||''}</div>
+        <div style="font-size:11pt;color:#475569;margin-top:3px">
+          Room: <b>${room}</b> · Date: <b>${date}</b> · Session: <b>${sess}</b> · Subject: <b>${[...new Set(subjList)].join(', ')||'—'}</b>
+        </div>
+        ${invList.length?`<div style="font-size:10pt;color:#475569;margin-top:2px">Invigilator: ${invList.join(' · ')}</div>`:''}
+      </div>
+      <div style="display:flex;gap:14px;margin-bottom:14px">
+        ${[['Present',counts.present||0,'#d1fae5','#065f46'],['Absent',counts.absent||0,'#fee2e2','#991b1b'],['Late',counts.late||0,'#fef3c7','#92400e']]
+          .map(([l,n,bg,c])=>`<div style="background:${bg};border-radius:8px;padding:8px 16px;text-align:center">
+            <div style="font-size:22pt;font-weight:800;color:${c}">${n}</div>
+            <div style="font-size:9pt;color:${c}">${l}</div>
+          </div>`).join('')}
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:11pt">
+        <thead><tr style="background:#1B3A6B;color:white">
+          <th style="padding:7px 8px">#</th><th style="padding:7px 8px">Roll</th>
+          <th style="padding:7px 8px;text-align:left">Class/Sec</th>
+          <th style="padding:7px 8px">Status</th><th style="padding:7px 8px">Signature</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+    const w=window.open('','_blank','width=800,height=700');
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <style>*{margin:0;padding:0;box-sizing:border-box}@page{size:A4;margin:12mm}
+    @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>
+    </head><body>${html}<script>setTimeout(()=>{window.print();},400);<\/script></body></html>`);
+    w.document.close();
+  };
+
+  window.ldExportDiary = (examId, date, sess, room, savedKey) => {
+    const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
+    const data  = Object.entries(saved).map(([key,status],i)=>{
+      const [cls,sec,roll]=key.split('_');
+      return {'SL':i+1,'Roll':roll,'Class':cls,'Section':'Sec '+sec,'Status':status,'Signature':''};
+    });
+    const ws=XLSX.utils.json_to_sheet(data);
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Attendance');
+    XLSX.writeFile(wb,`Attendance_${room}_${date}_${sess}.xlsx`);
+    showAlert('✅ Exported!','success');
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NEXT EXAM SETUP — 2nd Summative template + copy from previous
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderNextExam(el) {
+  const [exams, tts, teachers, settings] = await Promise.all([
+    DB.get('exams'), DB.get('examTimetables'), DB.get('teachers'), DB.getObj('settings')
+  ]);
+  const school = settings.schoolName||'Ramnagar High School (H.S.)';
+
+  // Preset 2nd Summative dates
+  const NEXT_TT = [
+    // Class V — 2nd Summative (1 hr, 30 marks)
+    {cls:'V',   subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
+    {cls:'V',   subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
+    {cls:'V',   subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
+    {cls:'V',   subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
+    // Class VI-VIII
+    {cls:'VI',  subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VI',  subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VI',  subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VI',  subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VI',  subj:'History',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VI',  subj:'Geography',          date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VII', subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VII', subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VII', subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VII', subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VII', subj:'History',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VII', subj:'Geography',          date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VII', subj:'Sanskrit',           date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VIII',subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VIII',subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VIII',subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VIII',subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VIII',subj:'History',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VIII',subj:'Geography',          date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    {cls:'VIII',subj:'Sanskrit',           date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
+    // Class IX-X
+    {cls:'IX',  subj:'Bengali',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'IX',  subj:'English',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'IX',  subj:'Mathematics',        date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'IX',  subj:'Physical Science',   date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'IX',  subj:'Life Science',       date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'IX',  subj:'History',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'IX',  subj:'Geography',          date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'X',   subj:'Bengali',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'X',   subj:'English',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'X',   subj:'Mathematics',        date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'X',   subj:'Physical Science',   date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'X',   subj:'Life Science',       date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'X',   subj:'History',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+    {cls:'X',   subj:'Geography',          date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
+  ];
+
+  const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+
+  el.innerHTML = `
+  <div class="page-title">🗓️ Next Exam Setup
+    <span style="font-size:12px;font-weight:400;color:var(--text-2);margin-left:8px">2nd Summative বা যেকোনো নতুন exam তৈরি করুন</span>
+  </div>
+  <div style="padding:0 24px 24px">
+
+    <div class="tab-bar">
+      <button class="tab-pill active" onclick="neTab('create',this)">➕ Create New Exam</button>
+      <button class="tab-pill" onclick="neTab('copy',this)">📋 Copy from Previous</button>
+      <button class="tab-pill" onclick="neTab('template',this)">⚡ 2nd Summative Template</button>
+    </div>
+
+    <!-- CREATE NEW -->
+    <div id="ne-create" class="tab-panel active">
+      <div class="card">
+        <div class="card-title">➕ New Exam তৈরি করুন</div>
+        <div class="form-row">
+          <div class="form-group"><label>Exam Name *</label>
+            <input id="ne-name" value="2nd Summative Evaluation" placeholder="2nd Summative Evaluation">
+          </div>
+          <div class="form-group"><label>Year</label>
+            <input id="ne-year" value="2026" placeholder="2026">
+          </div>
+          <div class="form-group"><label>Status</label>
+            <select id="ne-status">
+              <option value="Upcoming">Upcoming</option>
+              <option value="Ongoing">Ongoing</option>
+              <option value="Completed">Completed</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Start Date (dd-mm-yyyy)</label>
+            <input id="ne-start" placeholder="01-07-2026">
+          </div>
+          <div class="form-group"><label>End Date</label>
+            <input id="ne-end" placeholder="10-07-2026">
+          </div>
+          <div class="form-group"><label>Notes</label>
+            <input id="ne-notes" placeholder="Optional notes">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="neCreateExam()">➕ Create Exam</button>
+        <div id="ne-create-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- COPY FROM PREVIOUS -->
+    <div id="ne-copy" class="tab-panel">
+      <div class="card">
+        <div class="card-title">📋 আগের Exam থেকে copy করুন</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+          Teachers, Halls, Seating Plan structure — সব copy হবে। শুধু dates পাল্টান।
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Copy From *</label>
+            <select id="ne-copy-from"><option value="">--Select--</option>${examOpts}</select>
+          </div>
+          <div class="form-group"><label>New Exam Name</label>
+            <input id="ne-copy-name" value="2nd Summative Evaluation">
+          </div>
+          <div class="form-group"><label>New Year</label>
+            <input id="ne-copy-year" value="2026">
+          </div>
+        </div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;color:#1e40af">
+          <strong>Copy করা হবে:</strong><br>
+          ✅ Teachers list &nbsp;·&nbsp; ✅ Exam Halls &nbsp;·&nbsp;
+          ✅ Timetable structure (dates খালি) &nbsp;·&nbsp;
+          ✅ Students list &nbsp;·&nbsp;
+          ❌ Seating & Roster (নতুন করে generate করতে হবে)
+        </div>
+        <button class="btn btn-primary" onclick="neCopyExam()">📋 Copy & Create New Exam</button>
+        <div id="ne-copy-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- 2ND SUMMATIVE TEMPLATE -->
+    <div id="ne-template" class="tab-panel">
+      <div class="card">
+        <div class="card-title">⚡ 2nd Summative Evaluation — Template</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
+          ${NEXT_TT.length} entries preset। শুধু exam select করুন এবং dates দিন — তারপর EMS-এ save করুন।
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Exam *</label>
+            <select id="ne-tmpl-exam"><option value="">--Select or create above--</option>${examOpts}</select>
+          </div>
+          <div class="form-group"><label>Start Date (dd-mm-yyyy)</label>
+            <input id="ne-tmpl-start" placeholder="01-07-2026" oninput="neFillDates()">
+          </div>
+          <div class="form-group"><label>Skip Sundays</label>
+            <select id="ne-tmpl-skip">
+              <option value="yes">Yes (auto-skip)</option>
+              <option value="no">No</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Preview table -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:8px">📋 Timetable Preview (edit করুন):</div>
+          <div style="max-height:380px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead style="position:sticky;top:0">
+                <tr>
+                  <th style="padding:7px 10px;background:#1B3A6B;color:white;text-align:left">Class</th>
+                  <th style="padding:7px 10px;background:#1B3A6B;color:white;text-align:left">Subject</th>
+                  <th style="padding:7px 10px;background:#1B3A6B;color:white;text-align:left">Date</th>
+                  <th style="padding:7px 10px;background:#1B3A6B;color:white;text-align:left">Session</th>
+                  <th style="padding:7px 10px;background:#1B3A6B;color:white;text-align:left">Time</th>
+                  <th style="padding:7px 10px;background:#1B3A6B;color:white;text-align:center">Marks</th>
+                </tr>
+              </thead>
+              <tbody id="ne-tmpl-body">
+                ${NEXT_TT.map((t,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
+                  <td style="padding:6px 10px;border:1px solid #dde;font-weight:600;color:#1B3A6B">Class ${t.cls}</td>
+                  <td style="padding:6px 10px;border:1px solid #dde">${t.subj}</td>
+                  <td style="padding:6px 10px;border:1px solid #dde">
+                    <input data-i="${i}" data-f="date" value="${t.date}"
+                      style="width:110px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:11px;font-family:inherit">
+                  </td>
+                  <td style="padding:6px 10px;border:1px solid #dde">
+                    <span style="font-size:11px;padding:2px 7px;border-radius:99px;background:${t.sess.includes('2nd')?'#fef3c7':'#dbeafe'};font-weight:600">${t.sess}</span>
+                  </td>
+                  <td style="padding:6px 10px;border:1px solid #dde;font-size:11px;color:#475569">${t.time}</td>
+                  <td style="padding:6px 10px;border:1px solid #dde;text-align:center;font-weight:600">${t.marks}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="neSaveTemplate()">💾 Save Timetable to EMS</button>
+          <button class="btn btn-warning" onclick="neExportTemplate()">📊 Export as Excel</button>
+        </div>
+        <div id="ne-tmpl-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+      </div>
+    </div>
+  </div>`;
+
+  // Tab switcher
+  window.neTab = (tab,btn) => {
+    document.querySelectorAll('#ne-create,#ne-copy,#ne-template').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.tab-pill').forEach(b=>b.classList.remove('active'));
+    document.getElementById('ne-'+tab).classList.add('active');
+    if(btn) btn.classList.add('active');
+  };
+
+  // Auto-fill dates from start date
+  window.neFillDates = () => {
+    const startStr = document.getElementById('ne-tmpl-start').value.trim();
+    const skipSun  = document.getElementById('ne-tmpl-skip').value === 'yes';
+    if(!startStr.match(/^\d{2}-\d{2}-\d{4}$/)) return;
+    const [d,m,y] = startStr.split('-').map(Number);
+    let cur = new Date(y, m-1, d);
+
+    // Group subjects by date slots needed
+    // Same date = same index class subjects share dates
+    const subjects = [...new Set(NEXT_TT.map(t=>t.subj))];
+    const dateMap  = {};
+    let slotDate   = new Date(cur);
+
+    subjects.forEach(subj => {
+      if(skipSun && slotDate.getDay()===0) slotDate.setDate(slotDate.getDate()+1);
+      const dd = String(slotDate.getDate()).padStart(2,'0');
+      const mm = String(slotDate.getMonth()+1).padStart(2,'0');
+      const yy = slotDate.getFullYear();
+      const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      dateMap[subj] = { date:`${dd}-${mm}-${yy}`, day:days[slotDate.getDay()] };
+      slotDate.setDate(slotDate.getDate()+1);
+      if(skipSun && slotDate.getDay()===0) slotDate.setDate(slotDate.getDate()+1);
+    });
+
+    // Update inputs
+    document.querySelectorAll('#ne-tmpl-body input[data-f="date"]').forEach(inp => {
+      const i  = parseInt(inp.dataset.i);
+      const t  = NEXT_TT[i];
+      const dm = dateMap[t.subj];
+      if(dm) inp.value = dm.date;
+    });
+    showAlert('✅ Dates filled! Check and adjust if needed.','success');
+  };
+
+  // Create new exam
+  window.neCreateExam = async () => {
+    const name  = document.getElementById('ne-name').value.trim();
+    const year  = document.getElementById('ne-year').value.trim();
+    const status= document.getElementById('ne-status').value;
+    const start = document.getElementById('ne-start').value.trim();
+    const end   = document.getElementById('ne-end').value.trim();
+    const notes = document.getElementById('ne-notes').value.trim();
+    if(!name){showAlert('Exam name required.','error');return;}
+    const existing = await DB.get('exams');
+    if(existing.find(e=>e.name===name&&e.year===year)){
+      showAlert('Exam already exists!','warning');return;
+    }
+    const newExam = {
+      id: 'exam_'+Date.now(), name, year, status,
+      startDate:start, endDate:end, notes,
+      createdOn: new Date().toISOString()
+    };
+    await DB.set('exams', [...existing, newExam]);
+    document.getElementById('ne-create-status').innerHTML =
+      `✅ Exam "<b>${name} ${year}</b>" created! Now go to <a href="#" onclick="showPage('timetable')" style="color:var(--primary)">Timetable</a> to add schedule.`;
+    showAlert(`✅ "${name}" created!`,'success');
+    // Refresh exam dropdowns
+    ['ne-tmpl-exam','ne-copy-from'].forEach(id=>{
+      const sel=document.getElementById(id);
+      if(sel) sel.innerHTML+= `<option value="${newExam.id}">${newExam.name} (${newExam.year})</option>`;
+    });
+  };
+
+  // Copy exam
+  window.neCopyExam = async () => {
+    const fromId= document.getElementById('ne-copy-from').value;
+    const name  = document.getElementById('ne-copy-name').value.trim();
+    const year  = document.getElementById('ne-copy-year').value.trim();
+    if(!fromId||!name){showAlert('Select source exam and enter name.','error');return;}
+    const btn = document.querySelector('#ne-copy button');
+    if(btn){btn.disabled=true;btn.textContent='⏳ Copying...';}
+
+    try {
+      const [allExams,allTTs,allStudents,allTeachers,allHalls] = await Promise.all([
+        DB.get('exams'),DB.get('examTimetables'),
+        DB.get('students'),DB.get('teachers'),DB.get('halls')
+      ]);
+      const srcExam = allExams.find(e=>String(e.id)===String(fromId));
+      const newId   = 'exam_'+Date.now();
+      const newExam = { id:newId, name, year, status:'Upcoming',
+                        createdOn:new Date().toISOString() };
+
+      // Copy timetable structure (clear dates)
+      const srcTTs = allTTs.filter(t=>String(t.examId)===String(fromId));
+      const newTTs = srcTTs.map(t=>({
+        ...t, id: 'tt_'+Date.now()+'_'+Math.random().toString(36).slice(2,5),
+        examId:newId, examName:name,
+        date:'', day:''  // dates need to be filled
+      }));
+
+      await Promise.all([
+        DB.set('exams',[...allExams,newExam]),
+        DB.set('examTimetables',[...allTTs,...newTTs]),
+      ]);
+
+      document.getElementById('ne-copy-status').innerHTML =
+        `✅ Copied! <b>${newTTs.length}</b> timetable entries (dates empty). 
+         Go to <a href="#" onclick="showPage('timetable')" style="color:var(--primary)">Timetable</a> to fill dates.`;
+      showAlert(`✅ "${name}" created with ${newTTs.length} timetable entries!`,'success');
+    } catch(err) { showAlert('Error: '+err.message,'error'); }
+    if(btn){btn.disabled=false;btn.textContent='📋 Copy & Create New Exam';}
+  };
+
+  // Save 2nd Summative template
+  window.neSaveTemplate = async () => {
+    const examId = document.getElementById('ne-tmpl-exam').value;
+    if(!examId){showAlert('Select exam first.','error');return;}
+    const allExams = await DB.get('exams');
+    const exam = allExams.find(e=>String(e.id)===String(examId));
+    const allTTs   = await DB.get('examTimetables');
+
+    // Read from inputs
+    const inputs = document.querySelectorAll('#ne-tmpl-body input[data-f="date"]');
+    const newTTs = NEXT_TT.map((t,i)=>({
+      id: 'tt2_'+Date.now()+'_'+i,
+      examId, examName: exam?.name||'',
+      date:      inputs[i]?.value||'',
+      day:       '',
+      session:   t.sess,
+      time:      t.time,
+      startTime: t.time,
+      className: t.cls,
+      subject:   t.subj,
+      maxMarks:  t.marks,
+    }));
+
+    const filtered = allTTs.filter(t=>String(t.examId)!==String(examId));
+    await DB.set('examTimetables',[...filtered,...newTTs]);
+
+    document.getElementById('ne-tmpl-status').innerHTML =
+      `✅ <b>${newTTs.length}</b> entries saved! Go to <a href="#" onclick="showPage('timetable')" style="color:var(--primary)">Timetable</a> to verify.`;
+    showAlert(`✅ 2nd Summative timetable saved!`,'success');
+  };
+
+  // Export template as Excel
+  window.neExportTemplate = () => {
+    const inputs = document.querySelectorAll('#ne-tmpl-body input[data-f="date"]');
+    const data = NEXT_TT.map((t,i)=>({
+      'Class':t.cls,'Subject':t.subj,'Date':inputs[i]?.value||'',
+      'Session':t.sess,'Time':t.time,'Max Marks':t.marks
+    }));
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws['!cols']=[{wch:8},{wch:22},{wch:14},{wch:12},{wch:14},{wch:10}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'2nd Summative');
+    XLSX.writeFile(wb,'2nd_Summative_Timetable.xlsx');
+    showAlert('✅ Exported!','success');
   };
 }
 
