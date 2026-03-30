@@ -5378,7 +5378,6 @@ function offPrint(pages, orientation='portrait', title='Document') {
   const pageSize = isLand ? 'A4 landscape' : 'A4 portrait';
   const margin   = isLand ? '12mm 12mm 16mm 12mm' : '15mm 14mm 18mm 14mm';
 
-  // Wrap each page
   const body = pagesArr.map((html,i) =>
     `<div class="pg${isLand?' land':''}${i===pagesArr.length-1?' last':''}">${html}</div>`
   ).join('\n');
@@ -5390,18 +5389,50 @@ function offPrint(pages, orientation='portrait', title='Document') {
 <html lang="en"><head>
 <meta charset="UTF-8">
 <title>${title}</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,600;0,700;1,400&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-${OFF_PRINT_CSS}
-@page { size:${pageSize}; margin:${margin}; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans','Arial',sans-serif;background:white;color:#0F1E35;font-size:10.5pt;line-height:1.5}
+@page{size:${pageSize};margin:${margin}}
+@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.pg{page-break-after:always;page-break-inside:avoid}.pg:last-child{page-break-after:avoid}}
+.pg{font-family:'Noto Sans','Arial',sans-serif;background:white;color:#0F1E35}
+.off-hdr{border-bottom:3px double #1B3A6B;padding-bottom:10px;margin-bottom:12px;text-align:center}
+.off-hdr .school-name{font-family:'Noto Serif','Georgia',serif;font-size:16pt;font-weight:700;color:#1B3A6B;letter-spacing:.5px;line-height:1.2}
+.off-hdr .school-info{font-size:8pt;color:#475569;margin-top:3px;line-height:1.7}
+.off-hdr .doc-title{font-size:12pt;font-weight:700;color:#2C4F8C;margin-top:6px;text-transform:uppercase;letter-spacing:.8px}
+.off-hdr .doc-sub{font-size:9.5pt;color:#475569;margin-top:2px}
+.memo-line{display:flex;justify-content:space-between;font-size:9.5pt;color:#334155;margin-bottom:10px;border-bottom:.5px solid #CBD5E1;padding-bottom:6px}
+.off-table{width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:12px}
+.off-table th{background:#1B3A6B;color:white;padding:7px 10px;font-weight:600;font-size:9.5pt;border:1px solid #0F2850;text-align:left;white-space:nowrap}
+.off-table td{padding:6px 10px;border:1px solid #B0C4DE;vertical-align:middle}
+.off-table tr:nth-child(even) td{background:#F4F8FF}
+.off-table tr:nth-child(odd) td{background:#EAF2FF}
+.off-table .total-row td{background:#DCE9F8;font-weight:700;color:#1B3A6B;font-size:10.5pt;border-top:2px solid #1B3A6B}
+.off-sec{background:#DCE9F8;border-left:4px solid #1B3A6B;padding:5px 12px;font-weight:700;font-size:10.5pt;color:#1B3A6B;margin:12px 0 8px}
+.off-info{border:1px solid #B0C4DE;padding:8px 12px;background:#F8FAFD;margin-bottom:10px;font-size:10pt}
+.off-info table{width:100%;border-collapse:collapse}
+.off-info td{padding:3px 8px;font-size:10pt;vertical-align:top}
+.off-info .lbl{color:#475569;width:38%;font-weight:500}
+.off-info .val{font-weight:600;color:#0F1E35}
+.off-sig{display:flex;justify-content:space-between;margin-top:32px;font-size:10pt}
+.off-sig .sig-box{text-align:center;min-width:160px}
+.off-sig .sig-line{border-top:1px solid #334155;padding-top:5px;margin-top:36px;font-size:9.5pt;color:#334155}
+.off-sig .sig-name{font-weight:700;font-size:10pt;color:#1B3A6B}
+.off-foot{border-top:1px solid #B0C4DE;margin-top:14px;padding-top:5px;font-size:8pt;color:#94A3B8;display:flex;justify-content:space-between}
+.gold-bar{height:3px;background:#C9A84C;margin:0 0 8px}
+.navy-bar{height:2px;background:#1B3A6B;margin:8px 0}
+.no-break{page-break-inside:avoid}
+.badge-present{background:#d1fae5;color:#065f46;padding:1px 7px;border-radius:3px;font-size:9pt;font-weight:600}
+.badge-absent{background:#fee2e2;color:#991b1b;padding:1px 7px;border-radius:3px;font-size:9pt;font-weight:600}
+.badge-late{background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:3px;font-size:9pt;font-weight:600}
 </style>
 </head>
 <body>${body}
 <script>
-if(document.fonts && document.fonts.ready){
-  document.fonts.ready.then(()=>{ setTimeout(()=>{ window.print(); }, 400); });
-} else {
-  setTimeout(()=>{ window.print(); }, 900);
-}
+if(document.fonts&&document.fonts.ready){
+  document.fonts.ready.then(()=>{setTimeout(()=>{window.print();},400);});
+}else{setTimeout(()=>{window.print();},900);}
 <\/script>
 </body></html>`);
   pw.document.close();
