@@ -4986,11 +4986,25 @@ async function renderExport(el) {
 
     <!-- ══ IMPORT TAB ══ -->
     <div id="dh-import" class="tab-panel active">
+
+      <!-- Master Excel Import -->
       <div class="card" style="border-left:4px solid #f59e0b;margin-bottom:14px">
         <div class="card-title">📥 Master Excel → EMS Import</div>
-        <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
-          RHS_Master_Complete.xlsx upload করুন → সব data MongoDB-তে save হবে একসাথে
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:10px">
+          RHS_Master_Complete.xlsx upload করুন → students, timetable, seating সব একসাথে EMS-এ যাবে
         </p>
+
+        <!-- Clear before import option -->
+        <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#92400e">
+            <input type="checkbox" id="dh-clear-first" style="width:16px;height:16px">
+            আগে পুরনো data clear করুন তারপর import করুন (fresh start)
+          </label>
+          <div style="font-size:11px;color:#a16207;margin-top:4px;margin-left:24px">
+            ✅ এটা check করলে: Students, Timetable, Seating, Rosters আগে মুছবে, তারপর নতুন Excel-এর data যাবে
+          </div>
+        </div>
+
         <div id="dh-upload-zone"
           style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px"
           ondragover="event.preventDefault();this.style.borderColor='#f59e0b'"
@@ -5004,10 +5018,41 @@ async function renderExport(el) {
         </div>
         <div id="dh-parse-status" style="font-size:12px;color:var(--text-2);margin-bottom:10px"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-primary" id="dh-import-btn" disabled onclick="dhImportAll()">📤 Import to EMS (MongoDB)</button>
+          <button class="btn btn-primary" id="dh-import-btn" disabled onclick="dhImportAll()">📤 Import to EMS</button>
           <button class="btn btn-secondary" id="dh-printonly-btn" disabled onclick="dhLoadFile_printOnly()">🖨️ Just Print (no import)</button>
         </div>
         <div id="dh-import-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
+      </div>
+
+      <!-- One-click Seed Buttons -->
+      <div class="card" style="border-left:4px solid #7c3aed;margin-bottom:14px">
+        <div class="card-title">⚡ Quick Seed — 1st Summative 2026</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">
+          আপনার Excel থেকে parse করা data — এক click-এ EMS-এ load করুন
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px">
+            <div style="font-size:13px;font-weight:600;color:#1e40af;margin-bottom:4px">📅 Timetable</div>
+            <div style="font-size:11px;color:#3b82f6;margin-bottom:8px">Class V–X, সব subjects ও dates</div>
+            <button class="btn btn-primary btn-sm" id="dh-seed-tt" onclick="dhQuickSeed('timetable')">📅 Seed Timetable</button>
+          </div>
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px">
+            <div style="font-size:13px;font-weight:600;color:#065f46;margin-bottom:4px">📦 Answer Script</div>
+            <div style="font-size:11px;color:#059669;margin-bottom:8px">38 entries — class, subject, teacher, copies</div>
+            <button class="btn btn-success btn-sm" id="dh-seed-as" onclick="dhQuickSeed('answerscript')">📦 Seed Answer Scripts</button>
+          </div>
+          <div style="background:#fdf4ff;border:1px solid #e9d5ff;border-radius:8px;padding:12px">
+            <div style="font-size:13px;font-weight:600;color:#6b21a8;margin-bottom:4px">📝 Question Paper</div>
+            <div style="font-size:11px;color:#7c3aed;margin-bottom:8px">41 entries — teacher, class, subject, date</div>
+            <button class="btn btn-sm" style="background:#7c3aed;color:white" id="dh-seed-qp" onclick="dhQuickSeed('questionpaper')">📝 Seed QP List</button>
+          </div>
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px">
+            <div style="font-size:13px;font-weight:600;color:#9a3412;margin-bottom:4px">🔄 Seed All</div>
+            <div style="font-size:11px;color:#c2410c;margin-bottom:8px">উপরের সব একসাথে seed করুন</div>
+            <button class="btn btn-warning btn-sm" onclick="dhQuickSeed('all')">🔄 Seed All</button>
+          </div>
+        </div>
+        <div id="dh-seed-status" style="font-size:12px;color:var(--text-2);margin-top:10px"></div>
       </div>
 
       <!-- Student import -->
@@ -5176,18 +5221,88 @@ async function renderExport(el) {
 
   window.dhImportAll = async () => {
     if(!_dhWb){ showAlert('Upload Excel first.','error'); return; }
-    // Reuse the existing edImportToEMS logic by setting _edWb
+
+    const clearFirst = document.getElementById('dh-clear-first')?.checked;
+    if(clearFirst) {
+      if(!confirm('পুরনো data clear করে নতুন data import করবেন?\n\nStudents, Timetable, Seating Plans, Rosters — সব মুছবে।')) return;
+      showAlert('⏳ Clearing old data...','warning');
+      await Promise.all([
+        DB.set('students',[]), DB.set('examTimetables',[]),
+        DB.set('seatingPlans',[]), DB.set('invigilatorRosters',[]),
+        DB.set('halls',[]),
+      ]);
+      ['students','examTimetables','seatingPlans','invigilatorRosters','halls']
+        .forEach(k=>DB.invalidate(k));
+      await new Promise(r=>setTimeout(r,500));
+    }
+
     window._edWb = _dhWb;
     document.getElementById('dh-import-btn').disabled=true;
     document.getElementById('dh-import-btn').textContent='⏳ Importing...';
     try {
       await edImportToEMS();
-      document.getElementById('dh-import-status').innerHTML='✅ Import complete! Refresh page to see updated counts.';
+      document.getElementById('dh-import-status').innerHTML=
+        `✅ Import complete!${clearFirst?' (পুরনো data clear করা হয়েছে)':''} Page refresh করুন।`;
+      showAlert('✅ Import done!','success');
     } catch(e) {
       document.getElementById('dh-import-status').textContent='❌ '+e.message;
     }
     document.getElementById('dh-import-btn').disabled=false;
-    document.getElementById('dh-import-btn').textContent='📤 Import to EMS (MongoDB)';
+    document.getElementById('dh-import-btn').textContent='📤 Import to EMS';
+  };
+
+  // ── Quick Seed functions ──────────────────────────────────────────────────
+  window.dhQuickSeed = async (type) => {
+    const statusEl = document.getElementById('dh-seed-status');
+    const setBtn = (id, txt, dis) => {
+      const b=document.getElementById(id); if(b){b.disabled=dis;b.textContent=txt;}
+    };
+
+    const getOrCreateExam = async () => {
+      let exams=await DB.get('exams').catch(()=>[]);
+      let exam=exams.find(e=>(e.name||'').includes('1st Summative')&&(e.year||'').includes('2026'));
+      if(!exam){
+        exam={id:'rhs_1st_summative_2026',name:'1st Summative Evaluation',year:'2026',status:'Completed',createdOn:new Date().toISOString()};
+        await DB.set('exams',[...exams.filter(e=>e.id!==exam.id),exam]);
+      }
+      return exam;
+    };
+
+    if(type==='timetable'||type==='all') {
+      setBtn('dh-seed-tt','⏳...',true);
+      try {
+        await edSeedTimetable();
+        if(statusEl) statusEl.innerHTML=(statusEl.innerHTML||'')+'<div style="color:#065f46">✅ Timetable seeded</div>';
+      } catch(e){}
+      setBtn('dh-seed-tt','📅 Seed Timetable',false);
+    }
+
+    if(type==='answerscript'||type==='all') {
+      setBtn('dh-seed-as','⏳...',true);
+      try {
+        await edSeedAnswerScripts();
+        if(statusEl) statusEl.innerHTML=(statusEl.innerHTML||'')+'<div style="color:#065f46">✅ Answer Scripts seeded (38 entries)</div>';
+      } catch(e){}
+      setBtn('dh-seed-as','📦 Seed Answer Scripts',false);
+    }
+
+    if(type==='questionpaper'||type==='all') {
+      setBtn('dh-seed-qp','⏳...',true);
+      try {
+        const exam = await getOrCreateExam();
+        const existing = await DB.get('questionPapers').catch(()=>[]);
+        const filtered = existing.filter(q=>q.examId!==exam.id);
+        const newRows  = RHS_QP_LIST_2026.map((r,i)=>({
+          id:`qp_${exam.id}_${r.className}_${r.subject}`.replace(/\s+/g,'_'),
+          examId:exam.id, examName:exam.name,
+          ...r, returned:0,
+        }));
+        await DB.set('questionPapers',[...filtered,...newRows]);
+        if(statusEl) statusEl.innerHTML=(statusEl.innerHTML||'')+'<div style="color:#5b21b6">✅ Question Paper list seeded (41 entries)</div>';
+        showAlert(`✅ ${newRows.length} QP records saved!`,'success');
+      } catch(e){ showAlert('QP seed error: '+e.message,'error'); }
+      setBtn('dh-seed-qp','📝 Seed QP List',false);
+    }
   };
 
   window.dhLoadFile_printOnly = () => { showAlert('Data ready for printing!','success'); };
@@ -6179,11 +6294,12 @@ async function pnPrint(type) {
 // ANSWER SCRIPT — Distribution + Return Tracking
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderAnswerScript(el) {
-  const [exams, teachers, settings] = await Promise.all([
-    DB.get('exams'), DB.get('teachers'), DB.getObj('settings')
+  const [exams, teachers, settings, tts] = await Promise.all([
+    DB.get('exams'), DB.get('teachers'), DB.getObj('settings'), DB.get('examTimetables')
   ]);
-  const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
-  const school = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+  const examOpts    = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+  const teacherOpts = teachers.map(t=>`<option value="${t.name}">${t.name}</option>`).join('');
+  const school      = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
 
   el.innerHTML = `
   <div class="page-title">📦 Answer Script</div>
@@ -6191,7 +6307,8 @@ async function renderAnswerScript(el) {
     <div class="tab-bar">
       <button class="tab-pill active" onclick="asTab('dist',this)">📤 Distribution</button>
       <button class="tab-pill" onclick="asTab('return',this)">📥 Return Tracking</button>
-      <button class="tab-pill" onclick="asTab('summary',this)">📊 Summary</button>
+      <button class="tab-pill" onclick="asTab('import',this)">📊 Excel Import</button>
+      <button class="tab-pill" onclick="asTab('summary',this)">📈 Summary</button>
     </div>
 
     <!-- DISTRIBUTION TAB -->
@@ -6204,23 +6321,29 @@ async function renderAnswerScript(el) {
               <option value="">--Select--</option>${examOpts}
             </select>
           </div>
-          <div class="form-group"><label>Date</label>
+          <div class="form-group"><label>Date (optional filter)</label>
             <input id="as-date" placeholder="01-04-2026">
           </div>
           <div class="form-group"><label>Session</label>
             <select id="as-sess">
+              <option value="">All</option>
               <option value="1st Half">1st Half</option>
               <option value="2nd Half">2nd Half</option>
-              <option value="Both">Both</option>
             </select>
+          </div>
+          <div class="form-group" style="align-self:flex-end">
+            <button class="btn btn-secondary btn-sm" onclick="asAutoFill()">⚡ Auto-fill from Timetable</button>
           </div>
         </div>
         <div id="as-dist-table" style="margin-bottom:14px">
-          <p style="color:var(--text-2);font-size:13px;padding:16px 0">Select an exam to load distribution data</p>
+          <div class="empty-state"><div class="es-icon">📦</div>
+            <div class="es-title">Exam select করুন</div>
+            <div class="es-sub">তারপর "Auto-fill" বা manually data দিন</div>
+          </div>
         </div>
         <div class="btn-group">
-          <button class="btn btn-primary" onclick="asPrintDist()">🖨️ Print Distribution Sheet</button>
           <button class="btn btn-success" onclick="asSaveDist()">💾 Save</button>
+          <button class="btn btn-primary" onclick="asPrintDist()">🖨️ Print Official Sheet</button>
           <button class="btn btn-warning" onclick="asExportDist()">📊 Export Excel</button>
         </div>
       </div>
@@ -6238,19 +6361,55 @@ async function renderAnswerScript(el) {
           </div>
         </div>
         <div id="as-return-table" style="margin-bottom:14px">
-          <p style="color:var(--text-2);font-size:13px;padding:16px 0">Select an exam to load return data</p>
+          <div class="empty-state"><div class="es-icon">📥</div>
+            <div class="es-title">Exam select করুন</div>
+            <div class="es-sub">Distribution data থেকে return tracking load হবে</div>
+          </div>
         </div>
         <div class="btn-group">
-          <button class="btn btn-primary" onclick="asPrintReturn()">🖨️ Print Return Sheet</button>
           <button class="btn btn-success" onclick="asSaveReturn()">💾 Save Status</button>
+          <button class="btn btn-primary" onclick="asPrintReturn()">🖨️ Print Return Sheet</button>
         </div>
+      </div>
+    </div>
+
+    <!-- EXCEL IMPORT TAB -->
+    <div id="as-import" class="tab-panel">
+      <div class="card">
+        <div class="card-title">📊 Excel থেকে Distribution Data Import</div>
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#1e40af">
+          <strong>Excel format:</strong> Column A = Class, B = Subject, C = Date, D = Total Copies, E = Teacher Name<br>
+          <small>অথবা আপনার existing distribution Excel upload করুন — header auto-detect হবে</small>
+        </div>
+        <div class="form-group" style="max-width:300px;margin-bottom:12px">
+          <label>Exam *</label>
+          <select id="as-imp-exam"><option value="">--Select Exam--</option>${examOpts}</select>
+        </div>
+        <!-- Drop zone -->
+        <div id="as-drop-zone"
+          style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;cursor:pointer;margin-bottom:12px;transition:all .2s"
+          ondragover="event.preventDefault();this.style.borderColor='var(--primary)'"
+          ondragleave="this.style.borderColor=''"
+          ondrop="asDropFile(event)"
+          onclick="document.getElementById('as-file-input').click()">
+          <input type="file" id="as-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="asFileLoad(event)">
+          <div style="font-size:32px;margin-bottom:8px">📊</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:3px">Drop Excel here or click</div>
+          <div style="font-size:12px;color:var(--text-2)">Supported: .xlsx, .xls, .csv</div>
+        </div>
+        <div id="as-import-preview" style="margin-bottom:12px"></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="as-imp-btn" disabled onclick="asImportExcel()">📥 Import to EMS</button>
+          <button class="btn btn-secondary" onclick="asDownloadTemplate()">⬇️ Download Template</button>
+        </div>
+        <div id="as-import-status" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
       </div>
     </div>
 
     <!-- SUMMARY TAB -->
     <div id="as-summary" class="tab-panel">
       <div class="card">
-        <div class="card-title">📊 Distribution Summary</div>
+        <div class="card-title">📈 Distribution Summary</div>
         <div class="form-group" style="max-width:300px;margin-bottom:14px">
           <label>Exam</label>
           <select id="as-sum-exam" onchange="asLoadSummary()">
@@ -6258,78 +6417,146 @@ async function renderAnswerScript(el) {
           </select>
         </div>
         <div id="as-summary-content">
-          <p style="color:var(--text-2);font-size:13px;padding:16px 0">Select exam to see summary</p>
+          <div class="empty-state"><div class="es-icon">📈</div>
+            <div class="es-title">Exam select করুন</div>
+          </div>
         </div>
       </div>
     </div>
   </div>`;
 
+  // ── Tab switch ─────────────────────────────────────────────────────────────
   window.asTab = (tab,btn) => {
-    document.querySelectorAll('#as-dist,#as-return,#as-summary').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('#as-dist,#as-return,#as-import,#as-summary').forEach(p=>p.classList.remove('active'));
     document.querySelectorAll('.tab-pill').forEach(b=>b.classList.remove('active'));
     document.getElementById('as-'+tab).classList.add('active');
     if(btn&&btn!=='this') btn.classList.add('active');
-    else document.querySelectorAll('.tab-pill').forEach(b=>{if(b.getAttribute('onclick')?.includes(`'${tab}'`))b.classList.add('active');});
   };
 
+  // ── Auto-fill from Timetable ───────────────────────────────────────────────
+  window.asAutoFill = async () => {
+    const examId = document.getElementById('as-exam').value;
+    if(!examId){showAlert('Select exam first.','error');return;}
+    const [examTT, savedAS] = await Promise.all([
+      DB.get('examTimetables'), DB.get('answerScripts')
+    ]);
+    const filtered = examTT.filter(t=>String(t.examId)===String(examId));
+    if(!filtered.length){showAlert('No timetable found for this exam.','warning');return;}
+
+    const exams2 = await DB.get('exams');
+    const exam   = exams2.find(e=>String(e.id)===String(examId));
+    const saved  = savedAS.filter(a=>String(a.examId)===String(examId));
+
+    // Build distribution rows from timetable
+    const rows = [];
+    const classes = [...new Set(filtered.map(t=>t.className||''))].filter(Boolean).sort();
+    classes.forEach(cls=>{
+      filtered.filter(t=>t.className===cls)
+        .sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')))
+        .forEach(t=>{
+          if(!t.subject) return;
+          const existing = saved.find(s=>s.class===cls&&s.subject===t.subject);
+          rows.push({
+            examId, examName:exam?.name||'',
+            class:cls, subject:t.subject,
+            date:t.date||'', session:t.session||'',
+            totalCopies: existing?.totalCopies||0,
+            teacher:     existing?.teacher||'',
+            returned:    existing?.returned||0,
+          });
+        });
+    });
+
+    // Save auto-filled data
+    const allAS  = await DB.get('answerScripts');
+    const others = allAS.filter(a=>String(a.examId)!==String(examId));
+    await DB.set('answerScripts',[...others,...rows]);
+    showAlert(`✅ ${rows.length} rows auto-filled from timetable!`,'success');
+    asLoadDist();
+  };
+
+  // ── Load Distribution Table ─────────────────────────────────────────────────
   window.asLoadDist = async () => {
     const examId = document.getElementById('as-exam').value;
     if(!examId) return;
-    const [tts, answerScripts, allTeachers] = await Promise.all([
-      DB.get('examTimetables'), DB.get('answerScripts'), DB.get('teachers')
+    const [examTT, answerScripts] = await Promise.all([
+      DB.get('examTimetables'), DB.get('answerScripts')
     ]);
-    const examTT = tts.filter(t=>String(t.examId)===String(examId));
-    const saved  = answerScripts.filter(a=>String(a.examId)===String(examId));
+    const saved = answerScripts.filter(a=>String(a.examId)===String(examId));
 
-    // Group by class
-    const classes = [...new Set(examTT.map(t=>t.className||''))].filter(Boolean).sort();
-    const subjects = [...new Set(examTT.map(t=>t.subject||''))].filter(Boolean);
+    if(!saved.length){
+      document.getElementById('as-dist-table').innerHTML = `
+        <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;font-size:13px;color:#92400e">
+          ⚠️ কোনো data নেই। উপরে <strong>"⚡ Auto-fill from Timetable"</strong> click করুন অথবা Excel Import করুন।
+        </div>`;
+      return;
+    }
 
+    const classes = [...new Set(saved.map(s=>s.class||''))].filter(Boolean).sort();
     let html = `<div class="table-wrap"><table>
-      <thead><tr style="background:var(--primary);color:white">
-        <th style="padding:8px 10px">SL</th>
-        <th style="padding:8px 10px">Class</th>
-        <th style="padding:8px 10px">Subject</th>
-        <th style="padding:8px 10px">Date</th>
-        <th style="padding:8px 10px">Total Copies</th>
-        <th style="padding:8px 10px">Teacher Assigned</th>
-        <th style="padding:8px 10px">Signature</th>
+      <thead><tr>
+        <th style="width:40px">SL</th><th>Class</th><th>Subject</th>
+        <th>Date</th><th style="width:90px">Copies</th>
+        <th>Teacher Assigned</th><th style="width:100px">Signature</th>
       </tr></thead><tbody>`;
     let sl = 1;
-    classes.forEach(cls => {
-      examTT.filter(t=>t.className===cls).sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(t => {
-        const saved_row = saved.find(a=>a.class===cls&&a.subject===t.subject);
-        const teacherName = saved_row?.teacher || '—';
-        html += `<tr style="background:${sl%2===0?'var(--bg)':''}">
-          <td style="padding:7px 10px;text-align:center">${sl++}</td>
-          <td style="padding:7px 10px;font-weight:600;color:var(--primary)">Class ${cls}</td>
-          <td style="padding:7px 10px;font-weight:700">${t.subject||'—'}</td>
-          <td style="padding:7px 10px">${t.date||'—'}</td>
-          <td style="padding:7px 10px"><input type="number" placeholder="0" value="${saved_row?.totalCopies||''}"
-            style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:inherit"
-            data-cls="${cls}" data-subj="${t.subject}" data-field="total"></td>
-          <td style="padding:7px 10px"><input type="text" placeholder="Teacher name" value="${teacherName!=='—'?teacherName:''}"
-            style="width:160px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:inherit"
-            data-cls="${cls}" data-subj="${t.subject}" data-field="teacher"></td>
-          <td style="padding:7px 10px;width:120px"></td>
+    classes.forEach(cls=>{
+      html += `<tr><td colspan="7" style="padding:5px 10px;background:var(--bg-2);font-size:11px;font-weight:700;color:var(--text-2)">Class ${cls}</td></tr>`;
+      saved.filter(s=>s.class===cls).forEach(s=>{
+        html += `<tr>
+          <td style="text-align:center;padding:7px 10px">${sl++}</td>
+          <td style="padding:7px 10px;font-weight:600;color:var(--primary)">Class ${s.class}</td>
+          <td style="padding:7px 10px;font-weight:700">${s.subject||'—'}</td>
+          <td style="padding:7px 10px;font-size:12px">${s.date||'—'}</td>
+          <td style="padding:7px 10px">
+            <input type="number" value="${s.totalCopies||''}" placeholder="0" min="0"
+              style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);font-family:inherit;font-size:13px"
+              data-cls="${s.class}" data-subj="${s.subject}" data-field="total">
+          </td>
+          <td style="padding:7px 10px">
+            <select data-cls="${s.class}" data-subj="${s.subject}" data-field="teacher"
+              style="width:180px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);font-family:inherit;font-size:12px">
+              <option value="">--Select--</option>
+              ${teachers.map(t=>`<option ${s.teacher===t.name?'selected':''}>${t.name}</option>`).join('')}
+              <option value="_manual_" ${s.teacher&&!teachers.find(t=>t.name===s.teacher)?'selected':''}>✏️ Type manually</option>
+            </select>
+          </td>
+          <td style="padding:7px 10px"></td>
         </tr>`;
       });
     });
     html += '</tbody></table></div>';
     document.getElementById('as-dist-table').innerHTML = html;
+
+    // Handle manual teacher input
+    document.querySelectorAll('#as-dist-table select[data-field="teacher"]').forEach(sel=>{
+      sel.addEventListener('change', function(){
+        if(this.value==='_manual_'){
+          const inp = document.createElement('input');
+          inp.type='text'; inp.placeholder='Teacher name';
+          inp.dataset.cls=this.dataset.cls;
+          inp.dataset.subj=this.dataset.subj;
+          inp.dataset.field='teacher';
+          inp.style.cssText='width:180px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);font-family:inherit;font-size:12px';
+          this.replaceWith(inp);
+          inp.focus();
+        }
+      });
+    });
   };
 
+  // ── Save Distribution ──────────────────────────────────────────────────────
   window.asSaveDist = async () => {
     const examId = document.getElementById('as-exam').value;
     if(!examId){showAlert('Select exam first.','error');return;}
-    const exams = await DB.get('exams');
-    const exam  = exams.find(e=>String(e.id)===String(examId));
-    const rows  = [];
-    document.querySelectorAll('#as-dist-table input').forEach(inp => {
+    const exams2 = await DB.get('exams');
+    const exam   = exams2.find(e=>String(e.id)===String(examId));
+    const rows   = [];
+    document.querySelectorAll('#as-dist-table input[data-field],#as-dist-table select[data-field]').forEach(inp => {
       const cls  = inp.dataset.cls;
       const subj = inp.dataset.subj;
       const field= inp.dataset.field;
-      if(!cls||!subj) return;
+      if(!cls||!subj||inp.value==='_manual_') return;
       let row = rows.find(r=>r.class===cls&&r.subject===subj);
       if(!row){ row={examId,examName:exam?.name||'',class:cls,subject:subj}; rows.push(row); }
       if(field==='total') row.totalCopies = parseInt(inp.value)||0;
@@ -6341,93 +6568,211 @@ async function renderAnswerScript(el) {
     showAlert('✅ Saved!','success');
   };
 
+  // ── Print Distribution (offPrint) ────────────────────────────────────────
   window.asPrintDist = async () => {
     const examId = document.getElementById('as-exam').value;
     if(!examId){showAlert('Select exam first.','error');return;}
     await asSaveDist();
-    const [exams,tts,answerScripts,settings2] = await Promise.all([
-      DB.get('exams'),DB.get('examTimetables'),DB.get('answerScripts'),DB.getObj('settings')
+    const [exams2, answerScripts, stgs] = await Promise.all([
+      DB.get('exams'), DB.get('answerScripts'), DB.getObj('settings')
     ]);
-    const exam   = exams.find(e=>String(e.id)===String(examId));
-    const examTT = tts.filter(t=>String(t.examId)===String(examId));
+    const exam   = exams2.find(e=>String(e.id)===String(examId));
     const saved  = answerScripts.filter(a=>String(a.examId)===String(examId));
-    const sch    = settings2.schoolName||school;
-    const classes= [...new Set(examTT.map(t=>t.className||''))].filter(Boolean).sort();
+    const sch    = stgs.schoolName||school;
+    const prin   = stgs.principalName||'Dasarath Bagdi';
+    const classes= [...new Set(saved.map(s=>s.class||''))].filter(Boolean).sort();
 
     let rows=''; let sl=1;
     classes.forEach(cls=>{
-      rows+=`<tr style="background:#DCE9F8"><td colspan="7" style="padding:6px 12px;font-weight:700;color:#1B3A6B;font-size:11pt">Class ${cls}</td></tr>`;
-      examTT.filter(t=>t.className===cls).sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(t=>{
-        const s=saved.find(a=>a.class===cls&&a.subject===t.subject);
-        rows+=`<tr style="background:${sl%2===0?'#F4F8FF':'#fff'}">
-          <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center">${sl++}</td>
-          <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700;color:#8B5E0A">${t.subject||'—'}</td>
-          <td style="padding:7px 10px;border:1px solid #B0C4DE">${t.date||'—'}</td>
-          <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center">${s?.totalCopies||'___'}</td>
-          <td style="padding:7px 10px;border:1px solid #B0C4DE">${s?.teacher||'_________________________'}</td>
-          <td style="padding:7px 10px;border:1px solid #B0C4DE;width:100px"></td>
+      rows+=`<tr class="section-hdr"><td colspan="7" style="padding:6px 12px">Class ${cls}</td></tr>`;
+      saved.filter(s=>s.class===cls).forEach((s,i)=>{
+        rows+=`<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
+          <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center">${sl++}</td>
+          <td style="padding:6px 10px;border:1px solid #B0C4DE;font-weight:700">${s.subject||'—'}</td>
+          <td style="padding:6px 10px;border:1px solid #B0C4DE;font-size:9.5pt">${s.date||'—'}</td>
+          <td style="padding:6px 10px;border:1px solid #B0C4DE;font-size:9.5pt">${s.session||'—'}</td>
+          <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:700">${s.totalCopies||'___'}</td>
+          <td style="padding:6px 10px;border:1px solid #B0C4DE">${s.teacher||'_________________________'}</td>
+          <td style="padding:6px 10px;border:1px solid #B0C4DE;width:110px"></td>
         </tr>`;
       });
     });
 
-    const html=`<div style="font-family:Arial,sans-serif;padding:20px">
-      <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:12px;margin-bottom:16px">
-        <div style="font-size:18pt;font-weight:700;color:#1B3A6B">${sch}</div>
-        <div style="font-size:13pt;font-weight:600;color:#2C4F8C;margin-top:4px">Distribution of Answer Scripts</div>
-        <div style="font-size:11pt;color:#475569;margin-top:3px">${exam?.name||''} ${exam?.year?'— '+exam.year:''}</div>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:11pt">
-        <thead><tr style="background:#1B3A6B;color:white">
-          <th style="padding:8px 10px">SL</th>
-          <th style="padding:8px 10px;text-align:left">Subject</th>
-          <th style="padding:8px 10px;text-align:left">Date</th>
-          <th style="padding:8px 10px;text-align:center">Total Copies</th>
-          <th style="padding:8px 10px;text-align:left">Teacher's Name</th>
-          <th style="padding:8px 10px;text-align:left">Signature</th>
+    const html = offHeader(sch, `${exam?.name||''} ${exam?.year||''}`,
+        'ANSWER SCRIPT DISTRIBUTION REGISTER', `Total entries: ${saved.length}`, '', '') +
+      `<table class="off-table">
+        <thead><tr>
+          <th style="width:36px">#</th><th>Subject</th><th>Date</th>
+          <th>Session</th><th style="width:80px;text-align:center">Copies</th>
+          <th>Teacher's Name</th><th style="width:110px">Signature</th>
         </tr></thead>
         <tbody>${rows}</tbody>
-      </table>
-      <div style="display:flex;justify-content:space-between;margin-top:50px">
-        <div style="text-align:center"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:11pt;margin-top:40px">Exam Controller</div></div>
-        <div style="text-align:center"><div style="border-top:1px solid #333;width:180px;padding-top:5px;font-size:11pt;margin-top:40px">Head of Institution</div></div>
-      </div>
-    </div>`;
-    const w=window.open('','_blank','width=800,height=700');
-    if(!w){showAlert('Popup blocked!','error');return;}
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:white}
-    @page{size:A4;margin:12mm}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>
-    </head><body>${html}<script>setTimeout(()=>{window.print();},400);<\/script></body></html>`);
-    w.document.close();
+      </table>` +
+      offSignature('Exam Controller','',prin,sch) +
+      offFooter(sch,'Answer Script Distribution Register');
+
+    offPrint(html,'portrait','Answer Script Distribution');
   };
 
+  // ── Export Excel ────────────────────────────────────────────────────────────
+  window.asExportDist = async () => {
+    const examId = document.getElementById('as-exam').value;
+    if(!examId){showAlert('Select exam.','error');return;}
+    const saved=(await DB.get('answerScripts')).filter(a=>String(a.examId)===String(examId));
+    if(!saved.length){showAlert('No data. Auto-fill first.','warning');return;}
+    const ws=XLSX.utils.json_to_sheet(saved.map((s,i)=>({
+      'SL':i+1,'Class':s.class,'Subject':s.subject,'Date':s.date||'',
+      'Session':s.session||'','Total Copies':s.totalCopies||0,
+      'Teacher':s.teacher||'','Returned':s.returned||0
+    })));
+    ws['!cols']=[{wch:5},{wch:10},{wch:20},{wch:12},{wch:12},{wch:12},{wch:24},{wch:10}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Distribution');
+    XLSX.writeFile(wb,`AnswerScript_${(await DB.get('exams')).find(e=>String(e.id)===String(examId))?.name||'Exam'}.xlsx`);
+    showAlert('✅ Exported!','success');
+  };
+
+  // ── Download Template ───────────────────────────────────────────────────────
+  window.asDownloadTemplate = () => {
+    const data = [
+      {Class:'V',Subject:'Bengali',Date:'01-04-2026',Session:'1st Half','Total Copies':59,'Teacher Name':''},
+      {Class:'V',Subject:'English',Date:'02-04-2026',Session:'1st Half','Total Copies':59,'Teacher Name':''},
+      {Class:'VI',Subject:'Bengali',Date:'01-04-2026',Session:'1st Half','Total Copies':95,'Teacher Name':''},
+    ];
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws['!cols']=[{wch:8},{wch:20},{wch:12},{wch:12},{wch:14},{wch:24}];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Answer Script');
+    XLSX.writeFile(wb,'AnswerScript_Template.xlsx');
+    showAlert('✅ Template downloaded!','success');
+  };
+
+  // ── Excel Import ─────────────────────────────────────────────────────────────
+  let _asWbData = null;
+
+  window.asDropFile = (e) => {
+    e.preventDefault();
+    document.getElementById('as-drop-zone').style.borderColor='';
+    if(e.dataTransfer.files[0]) asProcessFile(e.dataTransfer.files[0]);
+  };
+  window.asFileLoad = (e) => { if(e.target.files[0]) asProcessFile(e.target.files[0]); };
+
+  window.asProcessFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const wb2  = XLSX.read(ev.target.result,{type:'array'});
+        const ws   = wb2.Sheets[wb2.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws,{defval:''});
+        if(!rows.length){showAlert('File empty.','error');return;}
+
+        // Auto-detect columns
+        const sample = rows[0];
+        const keys   = Object.keys(sample);
+        const findKey = (...names) => keys.find(k=>names.some(n=>k.toLowerCase().includes(n.toLowerCase())))||'';
+
+        const clsKey   = findKey('class','cls');
+        const subjKey  = findKey('subject','subj','বিষয়');
+        const dateKey  = findKey('date','তারিখ');
+        const sessKey  = findKey('session','half','সেশন');
+        const copyKey  = findKey('copies','total','copy','সংখ্যা','quantity');
+        const tchKey   = findKey('teacher','শিক্ষক','name');
+
+        _asWbData = rows.map(r=>({
+          class:   String(r[clsKey]||'').replace(/class\s*/i,'').trim(),
+          subject: String(r[subjKey]||'').trim(),
+          date:    String(r[dateKey]||'').trim(),
+          session: String(r[sessKey]||'').trim(),
+          totalCopies: parseInt(r[copyKey])||0,
+          teacher: String(r[tchKey]||'').trim(),
+        })).filter(r=>r.class&&r.subject);
+
+        // Show preview
+        const previewRows = _asWbData.slice(0,6).map((r,i)=>`<tr>
+          <td style="padding:5px 8px;border:1px solid var(--border)">${i+1}</td>
+          <td style="padding:5px 8px;border:1px solid var(--border)">${r.class}</td>
+          <td style="padding:5px 8px;border:1px solid var(--border)">${r.subject}</td>
+          <td style="padding:5px 8px;border:1px solid var(--border)">${r.date}</td>
+          <td style="padding:5px 8px;border:1px solid var(--border);text-align:center">${r.totalCopies||'—'}</td>
+          <td style="padding:5px 8px;border:1px solid var(--border)">${r.teacher||'—'}</td>
+        </tr>`).join('');
+
+        document.getElementById('as-import-preview').innerHTML = `
+          <div style="font-size:12px;font-weight:600;color:var(--primary);margin-bottom:6px">
+            ✅ ${_asWbData.length} rows found in "${file.name}"
+          </div>
+          <div class="table-wrap"><table style="font-size:12px">
+            <thead><tr style="background:var(--primary);color:white">
+              <th style="padding:5px 8px">#</th><th style="padding:5px 8px">Class</th>
+              <th style="padding:5px 8px">Subject</th><th style="padding:5px 8px">Date</th>
+              <th style="padding:5px 8px">Copies</th><th style="padding:5px 8px">Teacher</th>
+            </tr></thead>
+            <tbody>${previewRows}</tbody>
+          </table></div>
+          ${_asWbData.length>6?`<p style="font-size:11px;color:var(--text-2);margin-top:4px">...আরো ${_asWbData.length-6} rows</p>`:''}`;
+
+        document.getElementById('as-imp-btn').disabled = false;
+        showAlert(`✅ ${_asWbData.length} rows parsed! Select exam then click Import.`,'success');
+      } catch(err){
+        showAlert('File parse error: '+err.message,'error');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  window.asImportExcel = async () => {
+    const examId = document.getElementById('as-imp-exam').value;
+    if(!examId){showAlert('Select exam first.','error');return;}
+    if(!_asWbData||!_asWbData.length){showAlert('Upload file first.','error');return;}
+
+    const exams2 = await DB.get('exams');
+    const exam   = exams2.find(e=>String(e.id)===String(examId));
+    const newRows= _asWbData.map(r=>({...r, examId, examName:exam?.name||'', id:undefined}));
+
+    const existing = await DB.get('answerScripts');
+    const filtered = existing.filter(a=>String(a.examId)!==String(examId));
+    await DB.set('answerScripts',[...filtered,...newRows]);
+
+    document.getElementById('as-import-status').innerHTML =
+      `✅ <strong>${newRows.length}</strong> rows imported for <strong>${exam?.name||''}</strong>! Distribution tab-এ যান।`;
+    showAlert(`✅ ${newRows.length} rows imported!`,'success');
+    _asWbData = null;
+    document.getElementById('as-imp-btn').disabled = true;
+  };
+
+  // ── Return Tracking ─────────────────────────────────────────────────────────
   window.asLoadReturn = async () => {
     const examId = document.getElementById('as-ret-exam').value;
     if(!examId) return;
-    const [tts,answerScripts] = await Promise.all([DB.get('examTimetables'),DB.get('answerScripts')]);
-    const saved = answerScripts.filter(a=>String(a.examId)===String(examId));
-    if(!saved.length){document.getElementById('as-return-table').innerHTML=`<p style="color:var(--text-2);padding:16px">No distribution data found. Save from Distribution tab first.</p>`;return;}
+    const saved = (await DB.get('answerScripts')).filter(a=>String(a.examId)===String(examId));
+    if(!saved.length){
+      document.getElementById('as-return-table').innerHTML=`
+        <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;font-size:13px;color:#92400e">
+          ⚠️ No distribution data. Auto-fill from Distribution tab first.
+        </div>`;
+      return;
+    }
     let html=`<div class="table-wrap"><table>
-      <thead><tr style="background:var(--primary);color:white">
-        <th style="padding:8px 10px">Class</th><th style="padding:8px 10px">Subject</th>
-        <th style="padding:8px 10px">Teacher</th><th style="padding:8px 10px">Total</th>
-        <th style="padding:8px 10px">Returned</th><th style="padding:8px 10px">Status</th>
+      <thead><tr>
+        <th>Class</th><th>Subject</th><th>Teacher</th>
+        <th style="text-align:center">Distributed</th>
+        <th style="text-align:center">Returned</th><th>Status</th>
       </tr></thead><tbody>`;
     saved.forEach((s,i)=>{
-      const ret=s.returned||0;
-      const tot=s.totalCopies||0;
+      const ret=s.returned||0; const tot=s.totalCopies||0;
       const ok=ret>=tot&&tot>0;
       html+=`<tr style="background:${i%2===0?'var(--bg)':''}">
         <td style="padding:7px 10px;font-weight:600;color:var(--primary)">Class ${s.class}</td>
         <td style="padding:7px 10px;font-weight:700">${s.subject}</td>
         <td style="padding:7px 10px">${s.teacher||'—'}</td>
         <td style="padding:7px 10px;text-align:center">${tot}</td>
-        <td style="padding:7px 10px"><input type="number" value="${ret}" min="0" max="${tot}"
-          style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:inherit"
-          data-cls="${s.class}" data-subj="${s.subject}" data-field="returned"></td>
         <td style="padding:7px 10px">
-          <span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;background:${ok?'#d1fae5':'#fee2e2'};color:${ok?'#065f46':'#991b1b'}">
-            ${ok?'✅ Complete':'⏳ Pending'}
+          <input type="number" value="${ret}" min="0"
+            style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);font-family:inherit"
+            data-cls="${s.class}" data-subj="${s.subject}" data-field="returned">
+        </td>
+        <td style="padding:7px 10px">
+          <span style="padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;
+            background:${ok?'#d1fae5':'#fee2e2'};color:${ok?'#065f46':'#991b1b'}">
+            ${ok?'✅ Done':'⏳ Pending'}
           </span>
         </td>
       </tr>`;
@@ -6440,8 +6785,8 @@ async function renderAnswerScript(el) {
     const examId=document.getElementById('as-ret-exam').value;
     if(!examId){showAlert('Select exam.','error');return;}
     const existing=await DB.get('answerScripts');
-    document.querySelectorAll('#as-return-table input').forEach(inp=>{
-      const cls=inp.dataset.cls;const subj=inp.dataset.subj;
+    document.querySelectorAll('#as-return-table input[data-field="returned"]').forEach(inp=>{
+      const cls=inp.dataset.cls; const subj=inp.dataset.subj;
       const idx=existing.findIndex(a=>String(a.examId)===String(examId)&&a.class===cls&&a.subject===subj);
       if(idx>=0) existing[idx].returned=parseInt(inp.value)||0;
     });
@@ -6453,90 +6798,74 @@ async function renderAnswerScript(el) {
   window.asPrintReturn = async () => {
     await asSaveReturn();
     const examId=document.getElementById('as-ret-exam').value;
-    const [exams,answerScripts,settings2]=await Promise.all([DB.get('exams'),DB.get('answerScripts'),DB.getObj('settings')]);
-    const exam=exams.find(e=>String(e.id)===String(examId));
+    const [exams2,answerScripts,stgs]=await Promise.all([
+      DB.get('exams'),DB.get('answerScripts'),DB.getObj('settings')
+    ]);
+    const exam=exams2.find(e=>String(e.id)===String(examId));
     const saved=answerScripts.filter(a=>String(a.examId)===String(examId));
-    const sch=settings2.schoolName||school;
+    const sch=stgs.schoolName||school;
+    const prin=stgs.principalName||'Dasarath Bagdi';
+
     const rows=saved.map((s,i)=>{
       const ok=(s.returned||0)>=(s.totalCopies||0)&&(s.totalCopies||0)>0;
       return `<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
-        <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:600">Class ${s.class}</td>
-        <td style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700">${s.subject}</td>
-        <td style="padding:7px 10px;border:1px solid #B0C4DE">${s.teacher||'—'}</td>
-        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center">${s.totalCopies||0}</td>
-        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center">${s.returned||0}</td>
-        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;color:${ok?'#065f46':'#991b1b'};font-weight:700">${ok?'Complete':'Pending'}</td>
-        <td style="padding:7px 10px;border:1px solid #B0C4DE;width:120px"></td>
+        <td style="padding:6px 10px;border:1px solid #B0C4DE;font-weight:600">Class ${s.class}</td>
+        <td style="padding:6px 10px;border:1px solid #B0C4DE;font-weight:700">${s.subject}</td>
+        <td style="padding:6px 10px;border:1px solid #B0C4DE">${s.teacher||'—'}</td>
+        <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center">${s.totalCopies||0}</td>
+        <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center">${s.returned||0}</td>
+        <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:700;color:${ok?'#065f46':'#991b1b'}">${ok?'Complete':'Pending'}</td>
+        <td style="padding:6px 10px;border:1px solid #B0C4DE;width:110px"></td>
       </tr>`;
     }).join('');
-    const w=window.open('','_blank','width=800,height=700');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <style>*{margin:0;padding:0;box-sizing:border-box}@page{size:A4;margin:12mm}@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>
-    </head><body><div style="font-family:Arial,sans-serif;padding:20px">
-      <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:12px;margin-bottom:16px">
-        <div style="font-size:18pt;font-weight:700;color:#1B3A6B">${sch}</div>
-        <div style="font-size:12pt;font-weight:600;color:#2C4F8C;margin-top:4px">Answer Script Return Tracking — ${exam?.name||''}</div>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:11pt">
-        <thead><tr style="background:#1B3A6B;color:white">
-          <th style="padding:8px 10px;text-align:left">Class</th><th style="padding:8px 10px;text-align:left">Subject</th>
-          <th style="padding:8px 10px;text-align:left">Teacher</th><th style="padding:8px 10px;text-align:center">Distributed</th>
-          <th style="padding:8px 10px;text-align:center">Returned</th><th style="padding:8px 10px;text-align:center">Status</th>
-          <th style="padding:8px 10px;text-align:left">Sign</th>
+
+    const html = offHeader(sch,`${exam?.name||''}`,
+        'ANSWER SCRIPT RETURN REGISTER','','' ,'') +
+      `<table class="off-table">
+        <thead><tr><th>Class</th><th>Subject</th><th>Teacher</th>
+          <th style="text-align:center">Distributed</th><th style="text-align:center">Returned</th>
+          <th style="text-align:center">Status</th><th style="width:110px">Sign</th>
         </tr></thead>
         <tbody>${rows}</tbody>
-      </table>
-    </div><script>setTimeout(()=>{window.print();},400);<\/script></body></html>`);
-    w.document.close();
+      </table>` +
+      offSignature('Exam Controller','',prin,sch) +
+      offFooter(sch,'Answer Script Return Register');
+
+    offPrint(html,'portrait','Answer Script Return');
   };
 
+  // ── Summary ─────────────────────────────────────────────────────────────────
   window.asLoadSummary = async () => {
     const examId=document.getElementById('as-sum-exam').value;
     if(!examId) return;
-    const saved=await DB.get('answerScripts');
-    const rows=saved.filter(a=>String(a.examId)===String(examId));
-    if(!rows.length){document.getElementById('as-summary-content').innerHTML=`<p style="color:var(--text-2);padding:16px">No data. Use Distribution tab first.</p>`;return;}
-    const total=rows.reduce((s,r)=>s+(r.totalCopies||0),0);
-    const returned=rows.reduce((s,r)=>s+(r.returned||0),0);
-    const pending=rows.filter(r=>(r.returned||0)<(r.totalCopies||0));
+    const rows=(await DB.get('answerScripts')).filter(a=>String(a.examId)===String(examId));
+    if(!rows.length){
+      document.getElementById('as-summary-content').innerHTML=`
+        <div class="empty-state"><div class="es-icon">📊</div>
+          <div class="es-title">No data</div>
+          <div class="es-sub">Distribution tab থেকে data add করুন</div>
+        </div>`;
+      return;
+    }
+    const total    = rows.reduce((s,r)=>s+(r.totalCopies||0),0);
+    const returned = rows.reduce((s,r)=>s+(r.returned||0),0);
+    const pending  = rows.filter(r=>(r.returned||0)<(r.totalCopies||0)&&(r.totalCopies||0)>0);
     document.getElementById('as-summary-content').innerHTML=`
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
-        <div style="background:#dbeafe;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:24px;font-weight:800;color:#1e40af">${total}</div>
-          <div style="font-size:12px;color:#1e40af">Total Distributed</div>
-        </div>
-        <div style="background:#d1fae5;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:24px;font-weight:800;color:#065f46">${returned}</div>
-          <div style="font-size:12px;color:#065f46">Returned</div>
-        </div>
-        <div style="background:#fee2e2;border-radius:10px;padding:14px;text-align:center">
-          <div style="font-size:24px;font-weight:800;color:#991b1b">${pending.length}</div>
-          <div style="font-size:12px;color:#991b1b">Pending</div>
-        </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+        <div class="stat-card stat-blue"><h2>${total}</h2><p>Total Distributed</p></div>
+        <div class="stat-card stat-green"><h2>${returned}</h2><p>Returned</p></div>
+        <div class="stat-card ${pending.length?'stat-red':'stat-green'}"><h2>${pending.length}</h2><p>Pending</p></div>
       </div>
       ${pending.length?`<div style="background:#fef2f2;border-radius:8px;padding:12px;border:1px solid #fca5a5">
-        <div style="font-size:12px;font-weight:600;color:#991b1b;margin-bottom:8px">⏳ Pending Returns:</div>
-        ${pending.map(r=>`<div style="font-size:12px;color:#7f1d1d;padding:3px 0">• Class ${r.class} — ${r.subject} (Teacher: ${r.teacher||'—'})</div>`).join('')}
-      </div>`:'<div style="color:#065f46;font-weight:600;padding:12px">🎉 সব answer script return হয়ে গেছে!</div>'}`;
-  };
-
-  window.asExportDist = async () => {
-    const examId=document.getElementById('as-exam').value;
-    if(!examId){showAlert('Select exam.','error');return;}
-    const saved=await DB.get('answerScripts');
-    const rows=saved.filter(a=>String(a.examId)===String(examId));
-    if(!rows.length){showAlert('No data. Save distribution first.','warning');return;}
-    const ws=XLSX.utils.json_to_sheet(rows.map((r,i)=>({'SL':i+1,'Class':r.class,'Subject':r.subject,'Total Copies':r.totalCopies||0,'Teacher':r.teacher||'','Returned':r.returned||0,'Status':(r.returned||0)>=(r.totalCopies||0)?'Complete':'Pending'})));
-    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Answer Scripts');
-    XLSX.writeFile(wb,'AnswerScript_Distribution.xlsx');
-    showAlert('✅ Exported!','success');
+        <div style="font-size:12px;font-weight:600;color:#991b1b;margin-bottom:6px">⏳ Pending Returns:</div>
+        ${pending.map(r=>`<div style="font-size:12px;color:#7f1d1d;padding:3px 0">• Class ${r.class} — ${r.subject} (${r.teacher||'—'})</div>`).join('')}
+      </div>`:'<div style="color:#065f46;font-weight:600;padding:12px;background:#f0fdf4;border-radius:8px">🎉 সব answer script return হয়ে গেছে!</div>'}`;
   };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MERIT LIST — Class Topper + Certificate Print
+// CIRCULAR / NOTICE
 // ══════════════════════════════════════════════════════════════════════════════
-
 async function renderCircular(el) {
   const [exams, teachers, settings] = await Promise.all([
     DB.get('exams'), DB.get('teachers'), DB.getObj('settings')
@@ -9440,6 +9769,51 @@ const RHS_TIMETABLE_2026 = [
   {cls:'X',   subj:'Geography',          date:'10-04-2026',day:'Friday',   sess:'2nd Half',time:'1:00–2:30'},
 ];
 
+// ── Question Paper seed data (from RHS_Master_Complete.xlsx) ──────────────────
+const RHS_QP_LIST_2026 = [
+  {className:'IX', subject:'Geography',            examDate:'10-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Dasarath Bagdi',   set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Subodh K. Saha',    set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Subodh K. Saha',    set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'English',             examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Madan Besra',       set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Madan Besra',       set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Physical Science',     examDate:'07-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Sagar K. Roy',     set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sagar K. Roy',     set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Sangita Bhakat',    set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'History',              examDate:'08-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sangita Bhakat',    set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Life Science',         examDate:'08-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Tapan K. Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Life Science',         examDate:'08-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Tapan K. Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'History',              examDate:'09-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Dulal Biswas',      set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Pampa Das',        set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Samir Thandar',     set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'English',             examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Samir Thandar',     set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Shyamal K. Garai', set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Mathematics',          examDate:'06-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Shyamal K. Garai', set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Pronay K. Biswas', set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Pronay K. Biswas', set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Geography',           examDate:'09-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Apurba L. Mandal', set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'History',              examDate:'09-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Apurba L. Mandal', set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Mathematics',         examDate:'06-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sobhraj S. Roy',   set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Mathematics',          examDate:'06-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Sobhraj S. Roy',   set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Dhriti S. Karmakar',set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Geography',            examDate:'10-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Santosh Biswas',   set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Tamanna Choudhury',set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Geography',            examDate:'09-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Tamanna Choudhury',set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'History',              examDate:'08-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Chandana Pal',     set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'History',             examDate:'08-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Chandana Pal',     set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Banani Bhadra',    set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Banani Bhadra',    set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Suchitra Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Geography',            examDate:'09-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Suchitra Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Jayanta Pathak',   set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Physical Science',     examDate:'07-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Jayanta Pathak',   set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Sukanya Ghosh',    set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Bengali',             examDate:'01-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sukanya Ghosh',    set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Pradip Kar',       set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Poribesh o Porichoy', examDate:'07-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Pradip Kar',       set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Sanskrit',             examDate:'10-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Lakshman Ghosh',   set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Sanskrit',            examDate:'10-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Lakshman Ghosh',   set:'A',status:'Ready',copies:0},
+];
+
 async function edSeedTimetable() {
   const btn = document.getElementById('ed-seed-btn');
   if(btn){ btn.disabled=true; btn.textContent='⏳ Saving...'; }
@@ -9483,6 +9857,73 @@ async function edSeedTimetable() {
   } catch(err) {
     showAlert('Error: '+err.message, 'error');
     if(btn){ btn.disabled=false; btn.textContent='📅 Seed Timetable to EMS'; }
+  }
+}
+
+// ── Answer Script seed data (from RHS_Master_Complete.xlsx) ──────────────────
+const RHS_ANSWER_SCRIPT_2026 = [
+  {class:'V',  subject:'Bengali',            date:'01-04-2026',session:'1st Half',totalCopies:110,teacher:'Suchitra Mondal'},
+  {class:'V',  subject:'English',            date:'02-04-2026',session:'1st Half',totalCopies:110,teacher:'Sangita Bhakat'},
+  {class:'V',  subject:'Mathematics',        date:'06-04-2026',session:'1st Half',totalCopies:110,teacher:'Pradip Kar'},
+  {class:'V',  subject:'Poribesh o Porichoy',date:'07-04-2026',session:'1st Half',totalCopies:110,teacher:'Pampa Das'},
+  {class:'VI', subject:'Bengali',            date:'01-04-2026',session:'1st Half',totalCopies:95, teacher:'Banani Bhadra'},
+  {class:'VI', subject:'English',            date:'02-04-2026',session:'1st Half',totalCopies:95, teacher:'Tamanna Choudhury'},
+  {class:'VI', subject:'Mathematics',        date:'06-04-2026',session:'1st Half',totalCopies:95, teacher:'Jayanta Pathak'},
+  {class:'VI', subject:'Poribesh o Porichoy',date:'07-04-2026',session:'1st Half',totalCopies:95, teacher:'Dhriti S. Karmakar'},
+  {class:'VI', subject:'History',            date:'08-04-2026',session:'1st Half',totalCopies:95, teacher:'Chandana Pal'},
+  {class:'VI', subject:'Geography',          date:'09-04-2026',session:'1st Half',totalCopies:95, teacher:'Suchitra Mondal'},
+  {class:'VII',subject:'Bengali',            date:'01-04-2026',session:'1st Half',totalCopies:99, teacher:'Banani Bhadra'},
+  {class:'VII',subject:'English',            date:'02-04-2026',session:'1st Half',totalCopies:99, teacher:'Subodh K. Saha'},
+  {class:'VII',subject:'Mathematics',        date:'06-04-2026',session:'1st Half',totalCopies:99, teacher:'Shyamal K. Garai'},
+  {class:'VII',subject:'Poribesh o Porichoy',date:'07-04-2026',session:'1st Half',totalCopies:99, teacher:'Shyamal K. Garai'},
+  {class:'VII',subject:'History',            date:'08-04-2026',session:'1st Half',totalCopies:99, teacher:'Sangita Bhakat'},
+  {class:'VII',subject:'Geography',          date:'09-04-2026',session:'1st Half',totalCopies:99, teacher:'Tamanna Choudhury'},
+  {class:'VII',subject:'Sanskrit',           date:'10-04-2026',session:'1st Half',totalCopies:99, teacher:'Lakshman Ghosh'},
+  {class:'VIII',subject:'Bengali',           date:'01-04-2026',session:'1st Half',totalCopies:95, teacher:'Sukanya Ghosh'},
+  {class:'VIII',subject:'English',           date:'02-04-2026',session:'1st Half',totalCopies:95, teacher:'Madan Besra'},
+  {class:'VIII',subject:'Mathematics',       date:'06-04-2026',session:'1st Half',totalCopies:95, teacher:'Sobhraj S. Roy'},
+  {class:'VIII',subject:'Poribesh o Porichoy',date:'07-04-2026',session:'1st Half',totalCopies:95,teacher:'Pradip Kar'},
+  {class:'VIII',subject:'History',           date:'08-04-2026',session:'1st Half',totalCopies:95, teacher:'Chandana Pal'},
+  {class:'VIII',subject:'Geography',         date:'09-04-2026',session:'1st Half',totalCopies:95, teacher:'Apurba L. Mandal'},
+  {class:'VIII',subject:'Sanskrit',          date:'10-04-2026',session:'1st Half',totalCopies:95, teacher:'Lakshman Ghosh'},
+  {class:'IX', subject:'Bengali',            date:'01-04-2026',session:'2nd Half',totalCopies:134,teacher:'Sukanya Ghosh'},
+  {class:'IX', subject:'English',            date:'02-04-2026',session:'2nd Half',totalCopies:134,teacher:'Madan Besra'},
+  {class:'IX', subject:'Mathematics',        date:'06-04-2026',session:'2nd Half',totalCopies:134,teacher:'Shyamal K. Garai'},
+  {class:'IX', subject:'Physical Science',   date:'07-04-2026',session:'2nd Half',totalCopies:134,teacher:'Jayanta Pathak'},
+  {class:'IX', subject:'Life Science',       date:'08-04-2026',session:'2nd Half',totalCopies:134,teacher:'Tapan K. Mondal'},
+  {class:'IX', subject:'History',            date:'09-04-2026',session:'2nd Half',totalCopies:134,teacher:'Apurba L. Mandal'},
+  {class:'IX', subject:'Geography',          date:'10-04-2026',session:'2nd Half',totalCopies:134,teacher:'Dasarath Bagdi'},
+  {class:'X',  subject:'Bengali',            date:'01-04-2026',session:'2nd Half',totalCopies:146,teacher:'Pronay K. Biswas'},
+  {class:'X',  subject:'English',            date:'02-04-2026',session:'2nd Half',totalCopies:146,teacher:'Samir Thandar'},
+  {class:'X',  subject:'Mathematics',        date:'06-04-2026',session:'2nd Half',totalCopies:146,teacher:'Sobhraj S. Roy'},
+  {class:'X',  subject:'Physical Science',   date:'07-04-2026',session:'2nd Half',totalCopies:146,teacher:'Sagar K. Roy'},
+  {class:'X',  subject:'Life Science',       date:'08-04-2026',session:'2nd Half',totalCopies:146,teacher:'Tapan K. Mondal'},
+  {class:'X',  subject:'History',            date:'09-04-2026',session:'2nd Half',totalCopies:146,teacher:'Dulal Biswas'},
+  {class:'X',  subject:'Geography',          date:'10-04-2026',session:'2nd Half',totalCopies:146,teacher:'Santosh Biswas'},
+];
+
+async function edSeedAnswerScripts() {
+  const btn = document.getElementById('ed-seed-as-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Saving...'; }
+  try {
+    let exams = await DB.get('exams').catch(()=>[]);
+    let exam  = exams.find(e=>(e.name||'').includes('1st Summative')&&(e.year||'').includes('2026'));
+    if(!exam){
+      exam = {id:'rhs_1st_summative_2026',name:'1st Summative Evaluation',year:'2026',status:'Completed',createdOn:new Date().toISOString()};
+      await DB.set('exams',[...exams.filter(e=>e.id!==exam.id),exam]);
+    }
+    const rows = RHS_ANSWER_SCRIPT_2026.map(r=>({
+      ...r, examId:exam.id, examName:exam.name, returned:0,
+      id: `as_${exam.id}_${r.class}_${r.subject}`.replace(/\s+/g,'_'),
+    }));
+    const existing = await DB.get('answerScripts').catch(()=>[]);
+    const filtered = existing.filter(a=>a.examId!==exam.id);
+    await DB.set('answerScripts',[...filtered,...rows]);
+    showAlert(`✅ ${rows.length}টি Answer Script distribution entries saved!`,'success');
+    if(btn){ btn.textContent='✅ Saved!'; }
+  } catch(err){
+    showAlert('Error: '+err.message,'error');
+    if(btn){ btn.disabled=false; btn.textContent='📦 Seed Answer Scripts'; }
   }
 }
 
@@ -9642,6 +10083,16 @@ async function renderExamDocs(el) {
         </div>
         <button id="ed-seed-btn" class="btn btn-primary" onclick="edSeedTimetable()" style="white-space:nowrap;background:#2563eb">
           📅 Seed Timetable to EMS
+        </button>
+      </div>
+      <!-- Answer Script Seed -->
+      <div style="display:flex;align-items:center;justify-content:space-between;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 16px;margin-bottom:12px;gap:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:#065f46;margin-bottom:2px">⚡ Quick — 1st Summative 2026 Answer Scripts</div>
+          <div style="font-size:11px;color:#059669">38টি subject-wise distribution (Class V–X, teacher assigned, copies সহ) EMS-এ save করুন</div>
+        </div>
+        <button id="ed-seed-as-btn" class="btn btn-success" onclick="edSeedAnswerScripts()" style="white-space:nowrap">
+          📦 Seed Answer Scripts to EMS
         </button>
       </div>
       <div id="ed-upload-zone"
