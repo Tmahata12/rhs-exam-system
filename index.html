@@ -473,9 +473,17 @@ const DB = {
     },
 
     async set(key, value) {
+        // Write to LocalStorage immediately (instant UI)
         localStorage.setItem('_c_'+key, JSON.stringify(value));
+        // Mark as just-written (fresh) — other reads will use this immediately
         localStorage.setItem('_ts_'+key, String(Date.now()));
-        try { await apiFetch('/api/'+key+'/bulk','POST',{data:value}); }
+        // Sync to MongoDB
+        try {
+            await apiFetch('/api/'+key+'/bulk','POST',{data:value});
+            // After confirmed server write: mark stale so NEXT page visit re-fetches from DB
+            // This ensures data is always consistent after save
+            setTimeout(() => localStorage.setItem('_ts_'+key, '0'), 100);
+        }
         catch(e) { console.warn('DB.set offline:', e.message); }
     },
 
@@ -664,7 +672,8 @@ function showPage(page) {
         nextexam:     renderNextExam,
         examdocs:     renderExamDocs,
         teachers:     renderTeachers,
-        answerscript: renderAnswerScript,        circular:     renderCircular,
+        answerscript: renderAnswerScript,
+        circular:     renderCircular,
     };
     if (pages[page]) {
         content.innerHTML = `
@@ -10429,6 +10438,10 @@ async function edImportToEMS() {
       DB.set('halls',              hallsData.length ? hallsData : existingHalls),
       DB.set('classes',            classesData.length ? classesData : existingClasses),
     ]);
+
+    // ── CRITICAL: Invalidate ALL caches so next page load fetches fresh data ──
+    ['exams','examTimetables','seatingPlans','invigilatorRosters',
+     'teachers','answerScripts','halls','classes','questionPapers','settings'].forEach(k => DB.invalidate(k));
 
     const counts = {
       exams: 1, timetable: timetables.length, seating: planArr.length,
