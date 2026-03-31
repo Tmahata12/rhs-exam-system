@@ -435,22 +435,22 @@ async function apiFetch(ep, method='GET', body=null) {
 }
 
 const DB = {
-    // Cache TTL: 5 minutes for fast navigation
-    _ttl: 5 * 60 * 1000,
-    _ts: {},
+    // 30 minutes cache — data doesn't change that fast during exam
+    _ttl: 30 * 60 * 1000,
+    // Throttle bgSync — don't spam the server
+    _bgActive: {},
 
     async get(key) {
-        // 1. Return LocalStorage immediately if fresh (< 5 min)
-        const now = Date.now();
-        const tsKey = '_ts_'+key;
+        const now    = Date.now();
+        const tsKey  = '_ts_'+key;
         const cached = localStorage.getItem('_c_'+key);
-        const ts = parseInt(localStorage.getItem(tsKey)||'0');
+        const ts     = parseInt(localStorage.getItem(tsKey)||'0');
+        // Return cache immediately if fresh
         if(cached && (now - ts) < this._ttl) {
-            // Return cached immediately, sync in background
-            this._bgSync(key);
+            if((now - ts) > 60000) this._bgSync(key); // refresh after 1 min in bg
             return JSON.parse(cached);
         }
-        // 2. Fetch from MongoDB if stale/missing
+        // Fetch from server
         try {
             const data = await apiFetch('/api/'+key);
             const arr  = Array.isArray(data) ? data : (data.data||[]);
@@ -458,35 +458,33 @@ const DB = {
             localStorage.setItem(tsKey, String(Date.now()));
             return arr;
         } catch(e) {
-            // 3. Fallback to LocalStorage even if stale
             return cached ? JSON.parse(cached) : [];
         }
     },
 
-    // Background sync without blocking UI
     _bgSync(key) {
-        const tsKey = '_ts_'+key;
+        if(this._bgActive[key]) return; // already syncing
+        this._bgActive[key] = true;
         apiFetch('/api/'+key).then(data=>{
             const arr = Array.isArray(data) ? data : (data.data||[]);
             localStorage.setItem('_c_'+key, JSON.stringify(arr));
-            localStorage.setItem(tsKey, String(Date.now()));
-        }).catch(()=>{});
+            localStorage.setItem('_ts_'+key, String(Date.now()));
+        }).catch(()=>{}).finally(()=>{ delete this._bgActive[key]; });
     },
 
     async set(key, value) {
-        // Write to LocalStorage immediately (instant UI update)
         localStorage.setItem('_c_'+key, JSON.stringify(value));
         localStorage.setItem('_ts_'+key, String(Date.now()));
-        // Sync to MongoDB in background
         try { await apiFetch('/api/'+key+'/bulk','POST',{data:value}); }
         catch(e) { console.warn('DB.set offline:', e.message); }
     },
 
     async getObj(key) {
         const cached = localStorage.getItem('_c_'+key);
-        const ts = parseInt(localStorage.getItem('_ts_'+key)||'0');
-        if(cached && (Date.now()-ts) < this._ttl) {
-            this._bgSync(key);
+        const ts     = parseInt(localStorage.getItem('_ts_'+key)||'0');
+        const now    = Date.now();
+        if(cached && (now - ts) < this._ttl) {
+            if((now - ts) > 60000) this._bgSync(key);
             const d = JSON.parse(cached);
             return Array.isArray(d) ? (d[0]||{}) : d;
         }
@@ -507,9 +505,20 @@ const DB = {
         try { await apiFetch('/api/'+key,'PUT',value); } catch(e) {}
     },
 
-    // Force refresh (clear cache for a key)
     invalidate(key) {
         localStorage.removeItem('_ts_'+key);
+    },
+
+    // Preload all common collections in parallel (call on login)
+    preloadAll() {
+        const keys = ['exams','examTimetables','students','teachers','seatingPlans',
+                      'invigilatorRosters','halls','settings','questionPapers',
+                      'answerScripts','classes'];
+        // Only preload if cache is stale
+        keys.forEach(k=>{
+            const ts = parseInt(localStorage.getItem('_ts_'+k)||'0');
+            if(Date.now()-ts > this._ttl) this._bgSync(k);
+        });
     }
 };
 
@@ -553,8 +562,15 @@ function startApp(name, role, synced) {
     document.getElementById('syncBadge').title = synced ? 'Connected to MongoDB' : 'Click to retry cloud connection';
     document.getElementById('syncBadge').style.cursor = 'pointer';
     document.getElementById('syncBadge').onclick = checkSync;
+
+    // Load dashboard immediately — don't wait for sync check
     showPage('dashboard');
-    checkSync();
+
+    // Preload all collections in background after 1s (don't block dashboard)
+    setTimeout(()=>{
+        DB.preloadAll();
+        checkSync();
+    }, 1000);
 }
 
 async function checkSync() {
@@ -9091,17 +9107,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const role=sessionStorage.getItem('ems_role');
     if(user&&role) startApp(user,role,false);
 
-    // ── Keep-alive ping every 8 min to prevent Render.com sleep ──
+    // ── Keep-alive ping every 5 min to prevent Render.com sleep ──
     const BACKEND = 'https://rhs-prms-backend.onrender.com';
     const ping = () => {
         fetch(`${BACKEND}/api/ping`, {method:'GET', signal:AbortSignal.timeout(5000)})
             .catch(()=>{}); // silently ignore errors
     };
-    // Ping after 30 sec (let page settle first), then every 8 min
-    setTimeout(()=>{
-        ping();
-        setInterval(ping, 8 * 60 * 1000);
-    }, 30000);
+    // Ping immediately on load, then every 5 min
+    ping();
+    setInterval(ping, 5 * 60 * 1000);
 
     // Update loader message during load
     const loadMsg = document.getElementById('loadMsg');
