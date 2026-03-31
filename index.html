@@ -97,15 +97,16 @@ body { font-family:'Inter',system-ui,-apple-system,sans-serif; background:var(--
 
 .app-header {
   background:linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 55%,#4338ca 100%);
-  color:#fff; padding:0 20px; height:var(--header-h);
+  color:#fff; padding:0 16px; height:var(--header-h);
   display:flex; align-items:center; justify-content:space-between;
   box-shadow:0 2px 16px rgba(29,78,216,0.3);
-  position:sticky; top:0; z-index:100; gap:12px;
+  position:sticky; top:0; z-index:100; gap:10px; overflow:hidden;
 }
-.app-header h1 { font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px; letter-spacing:-.2px; flex:1; }
-.app-header h1 small { font-size:10px; font-weight:500; opacity:.65; background:rgba(255,255,255,.15); padding:2px 7px; border-radius:8px; }
-@media(max-width:680px){ .app-header h1 small { display:none; } }
-.header-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.app-header h1 { font-size:14px; font-weight:700; display:flex; align-items:center; gap:7px; letter-spacing:-.2px; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.app-header h1 small { font-size:10px; font-weight:500; opacity:.65; background:rgba(255,255,255,.15); padding:2px 7px; border-radius:8px; flex-shrink:0; }
+@media(max-width:900px){ .app-header h1 small { display:none; } }
+@media(max-width:600px){ .app-header h1 .title-text { display:none; } }
+.header-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .sync-badge { padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
 .sync-ok   { background:rgba(5,150,105,.25); border:1px solid rgba(5,150,105,.4); color:#bbf7d0; }
 .sync-fail { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.18); color:rgba(255,255,255,.8); }
@@ -298,13 +299,13 @@ tbody tr:hover td { background:#f5f8ff; }
 
   <!-- Header -->
   <div class="app-header">
-    <h1>🎓 RHS Exam Management System</h1>
+    <h1>🎓 <span class="title-text">RHS Exam Management</span><small>EMS v2</small></h1>
     <div class="header-right">
       <button id="darkToggle" onclick="toggleDark()" title="Toggle Dark Mode"
         style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
-               color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;
-               font-size:16px;transition:all 0.2s;" title="Dark Mode">🌙</button>
-      <div id="syncBadge" class="sync-badge sync-fail">💾 Local Mode</div>
+               color:#fff;border-radius:8px;padding:5px 10px;cursor:pointer;
+               font-size:15px;transition:all 0.2s;flex-shrink:0">🌙</button>
+      <div id="syncBadge" class="sync-badge sync-fail">💾 Offline</div>
       <div class="user-chip">👤 <span id="headerUser">—</span></div>
       <button class="logout-btn" onclick="doLogout()">Logout</button>
     </div>
@@ -1579,30 +1580,97 @@ async function autoGenTT(){
 // ── HALLS ─────────────────────────────────────────────────────────────────────
 async function renderHalls(el) {
     const halls = await DB.get('halls');
+    const total = halls.reduce((s,h)=>s+(h.capacity||0),0);
+
     el.innerHTML = `
     <div class="page-title">🏛️ Exam Halls</div>
-    <div class="card">
-      <div class="card-title">➕ Add Hall</div>
-      <div class="form-row">
-        <div class="form-group"><label>Hall Name *</label><input id="hN" placeholder="e.g., Main Hall, Room 101"></div>
-        <div class="form-group"><label>Capacity *</label><input type="number" id="hC" placeholder="e.g., 40" min="1"></div>
-        <div class="form-group"><label>Location</label><input id="hL" placeholder="e.g., Ground Floor, Block A"></div>
+    <div style="padding:0 24px 24px">
+
+      ${!halls.length ? `
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:#1e40af">⚡ Quick Setup — 1st Summative 2026</div>
+          <div style="font-size:11px;color:#3b82f6;margin-top:2px">11টা room (R-3 থেকে R-19) — capacity সহ একক click-এ load করুন</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="hallSeedRHS()">🏛️ Seed Rooms from Excel</button>
+      </div>` : ''}
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">➕ Add Hall Manually</div>
+        <div class="form-row">
+          <div class="form-group"><label>Hall / Room Name *</label>
+            <input id="hN" placeholder="e.g., R-10, Main Hall">
+          </div>
+          <div class="form-group"><label>Capacity *</label>
+            <input type="number" id="hC" placeholder="e.g., 30" min="1">
+          </div>
+          <div class="form-group"><label>Location / Block</label>
+            <input id="hL" placeholder="e.g., Ground Floor, Block A">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="addHall()">➕ Add Hall</button>
       </div>
-      <button class="btn btn-primary" onclick="addHall()">➕ Add Hall</button>
-    </div>
-    <div class="card">
-      <div class="card-title">🏛️ All Halls (Total capacity: ${halls.reduce((s,h)=>s+(h.capacity||0),0)})</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Hall Name</th><th>Capacity</th><th>Location</th><th>Actions</th></tr></thead>
-        <tbody id="hallTbody">${halls.length ? halls.map(h=>`
-          <tr>
-            <td><strong>${h.name}</strong></td>
-            <td><span class="badge badge-blue">${h.capacity} students</span></td>
-            <td>${h.location||'—'}</td>
-            <td><button class="btn btn-danger btn-sm" onclick="deleteHallItem('${h.id}')">🗑️</button></td>
-          </tr>`).join('') : emptyRow(4,'No halls added yet.')}</tbody>
-      </table></div>
+
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>🏛️ All Halls
+            <span style="font-size:11px;font-weight:500;color:var(--text-2);margin-left:6px">${halls.length} rooms · Total capacity: ${total}</span>
+          </span>
+          ${halls.length ? `<button class="btn btn-danger btn-sm" onclick="if(confirm('সব halls delete করবেন?'))hallClearAll()">🗑️ Clear All</button>` : ''}
+        </div>
+        ${halls.length ? `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th style="width:40px">#</th><th>Room Name</th><th style="text-align:center">Capacity</th><th>Location</th><th style="width:80px">Actions</th></tr></thead>
+            <tbody>
+              ${halls.map((h,i)=>`<tr>
+                <td style="text-align:center;color:var(--text-2)">${i+1}</td>
+                <td><strong>${h.name}</strong></td>
+                <td style="text-align:center"><span class="badge badge-blue">${h.capacity}</span></td>
+                <td>${h.location||'—'}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="deleteHallItem('${h.id}')">🗑️</button></td>
+              </tr>`).join('')}
+              <tr style="background:var(--bg-2)">
+                <td colspan="2" style="padding:8px 13px;font-weight:700;color:var(--text)">TOTAL</td>
+                <td style="text-align:center;padding:8px 13px;font-weight:800;color:var(--primary)">${total}</td>
+                <td colspan="2"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>` : `
+        <div class="empty-state">
+          <div class="es-icon">🏛️</div>
+          <div class="es-title">No halls added yet</div>
+          <div class="es-sub">উপরে "Seed Rooms from Excel" click করুন অথবা manually add করুন</div>
+        </div>`}
+      </div>
     </div>`;
+}
+
+async function hallSeedRHS() {
+    const RHS_HALLS = [
+        {name:'R-3',  capacity:30, location:'Block A'},
+        {name:'R-8',  capacity:40, location:'Block A'},
+        {name:'R-9',  capacity:28, location:'Block A'},
+        {name:'R-10', capacity:25, location:'Block B'},
+        {name:'R-12', capacity:24, location:'Block B'},
+        {name:'R-13', capacity:28, location:'Block B'},
+        {name:'R-14', capacity:29, location:'Block B'},
+        {name:'R-16', capacity:40, location:'Block C'},
+        {name:'R-17', capacity:60, location:'Block C'},
+        {name:'R-18', capacity:60, location:'Block C'},
+        {name:'R-19', capacity:60, location:'Block C'},
+    ];
+    const halls = RHS_HALLS.map(h=>({...h, id:'hall_'+h.name.replace('-',''), assigned1H:0, assigned2H:0}));
+    await DB.set('halls', halls);
+    showAlert(`✅ ${halls.length} rooms seeded! Total capacity: ${halls.reduce((s,h)=>s+h.capacity,0)}`,'success');
+    renderHalls(document.getElementById('mainContent'));
+}
+
+async function hallClearAll() {
+    await DB.set('halls',[]);
+    showAlert('All halls cleared.','warning');
+    renderHalls(document.getElementById('mainContent'));
 }
 
 async function addHall() {
