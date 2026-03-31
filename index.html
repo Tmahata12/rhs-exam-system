@@ -97,22 +97,45 @@ body { font-family:'Inter',system-ui,-apple-system,sans-serif; background:var(--
 
 .app-header {
   background:linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 55%,#4338ca 100%);
-  color:#fff; padding:0 16px; height:var(--header-h);
+  color:#fff; padding:0 14px; height:var(--header-h);
   display:flex; align-items:center; justify-content:space-between;
   box-shadow:0 2px 16px rgba(29,78,216,0.3);
-  position:sticky; top:0; z-index:100; gap:10px; overflow:hidden;
+  position:sticky; top:0; z-index:100; gap:8px;
 }
-.app-header h1 { font-size:14px; font-weight:700; display:flex; align-items:center; gap:7px; letter-spacing:-.2px; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.app-header h1 small { font-size:10px; font-weight:500; opacity:.65; background:rgba(255,255,255,.15); padding:2px 7px; border-radius:8px; flex-shrink:0; }
-@media(max-width:900px){ .app-header h1 small { display:none; } }
+.app-header h1 { font-size:14px; font-weight:700; display:flex; align-items:center; gap:7px; letter-spacing:-.2px; flex:1; min-width:0; overflow:hidden; }
+.app-header h1 .title-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 @media(max-width:600px){ .app-header h1 .title-text { display:none; } }
 .header-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
-.sync-badge { padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
+.sync-badge { padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
 .sync-ok   { background:rgba(5,150,105,.25); border:1px solid rgba(5,150,105,.4); color:#bbf7d0; }
 .sync-fail { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.18); color:rgba(255,255,255,.8); }
-.user-chip { background:rgba(255,255,255,.15); border-radius:20px; padding:4px 12px; font-size:12px; font-weight:600; border:1px solid rgba(255,255,255,.2); white-space:nowrap; }
-.logout-btn { background:rgba(220,38,38,.7); border:1px solid rgba(220,38,38,.4); color:#fff; border-radius:7px; padding:5px 12px; cursor:pointer; font-size:12px; font-weight:600; transition:background .13s; white-space:nowrap; }
+.user-chip { background:rgba(255,255,255,.15); border-radius:20px; padding:4px 11px; font-size:12px; font-weight:600; border:1px solid rgba(255,255,255,.2); white-space:nowrap; }
+.logout-btn { background:rgba(220,38,38,.7); border:1px solid rgba(220,38,38,.4); color:#fff; border-radius:7px; padding:5px 11px; cursor:pointer; font-size:12px; font-weight:600; transition:background .13s; white-space:nowrap; }
 .logout-btn:hover { background:rgba(220,38,38,.95); }
+
+/* ── SIDEBAR COLLAPSE ── */
+.sidebar {
+  width:var(--sidebar-w); background:#fff; border-right:1px solid var(--border);
+  overflow-y:auto; overflow-x:hidden; flex-shrink:0;
+  display:flex; flex-direction:column; padding:8px 0 20px;
+  transition:width .2s ease; position:relative;
+}
+.sidebar.collapsed { width:52px; }
+.sidebar.collapsed .sidebar-section { opacity:0; height:0; padding:0; overflow:hidden; }
+.sidebar.collapsed .sidebar-item span:last-child { display:none; }
+.sidebar.collapsed .sidebar-item { justify-content:center; padding:10px 6px; margin:1px 4px; }
+.sidebar.collapsed .sidebar-item .icon { width:auto; font-size:18px; }
+.sidebar.collapsed .sidebar-item.active { border-left-color:var(--primary); }
+/* Tooltip on collapsed */
+.sidebar.collapsed .sidebar-item { position:relative; }
+.sidebar.collapsed .sidebar-item:hover::after {
+  content:attr(data-label);
+  position:absolute; left:56px; top:50%; transform:translateY(-50%);
+  background:#1e293b; color:#fff; font-size:11px; font-weight:600;
+  padding:4px 10px; border-radius:6px; white-space:nowrap; z-index:999;
+  box-shadow:0 4px 12px rgba(0,0,0,.25);
+}
+[data-theme="dark"] .sidebar.collapsed .sidebar-item:hover::after { background:#334155; }
 
 .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(150deg,#0f172a 0%,#1e3a8a 45%,#312e81 100%); position:relative; overflow:hidden; }
 .login-wrap::before { content:''; position:absolute; width:560px; height:560px; background:radial-gradient(circle,rgba(99,102,241,.18) 0%,transparent 70%); top:-80px; right:-80px; border-radius:50%; }
@@ -134,7 +157,7 @@ body { font-family:'Inter',system-ui,-apple-system,sans-serif; background:var(--
 
 .app-body { display:flex; height:calc(100vh - var(--header-h)); overflow:hidden; }
 
-.sidebar { width:var(--sidebar-w); background:#fff; border-right:1px solid var(--border); overflow-y:auto; overflow-x:hidden; flex-shrink:0; display:flex; flex-direction:column; padding:8px 0 20px; }
+/* ── SIDEBAR ITEM CSS ── */
 .sidebar-section { font-size:9.5px; font-weight:700; letter-spacing:.8px; color:var(--text-3); text-transform:uppercase; padding:14px 14px 4px; user-select:none; }
 .sidebar-item { display:flex; align-items:center; gap:9px; padding:7px 12px; margin:1px 6px; border-radius:8px; cursor:pointer; transition:all .12s; color:var(--text-2); font-size:13px; font-weight:500; border-left:3px solid transparent; }
 .sidebar-item:hover { background:var(--bg); color:var(--text); }
@@ -299,13 +322,18 @@ tbody tr:hover td { background:#f5f8ff; }
 
   <!-- Header -->
   <div class="app-header">
-    <h1>🎓 <span class="title-text">RHS Exam Management</span><small>EMS v2</small></h1>
+    <button id="sidebarToggleBtn" onclick="toggleSidebar()"
+      style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
+             color:#fff;border-radius:8px;padding:5px 9px;cursor:pointer;
+             font-size:17px;transition:all 0.2s;flex-shrink:0;line-height:1"
+      title="Toggle Menu">☰</button>
+    <h1>🎓 <span class="title-text">RHS Exam Management</span></h1>
     <div class="header-right">
       <button id="darkToggle" onclick="toggleDark()" title="Toggle Dark Mode"
         style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
                color:#fff;border-radius:8px;padding:5px 10px;cursor:pointer;
                font-size:15px;transition:all 0.2s;flex-shrink:0">🌙</button>
-      <div id="syncBadge" class="sync-badge sync-fail">💾 Offline</div>
+      <div id="syncBadge" class="sync-badge sync-fail">💾 Sync</div>
       <div class="user-chip">👤 <span id="headerUser">—</span></div>
       <button class="logout-btn" onclick="doLogout()">Logout</button>
     </div>
@@ -313,90 +341,90 @@ tbody tr:hover td { background:#f5f8ff; }
 
   <div class="app-body">
     <!-- Sidebar -->
-    <div class="sidebar">
+    <div class="sidebar" id="mainSidebar">
       <div class="sidebar-section">Exam</div>
-      <div class="sidebar-item active" onclick="showPage('dashboard')" id="nav-dashboard">
+      <div class="sidebar-item active" onclick="showPage('dashboard')" id="nav-dashboard" data-label="Dashboard">
         <span class="icon">📊</span><span>Dashboard</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('exams')" id="nav-exams">
+      <div class="sidebar-item" onclick="showPage('exams')" id="nav-exams" data-label="Exam Schedules">
         <span class="icon">📋</span><span>Exam Schedules</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('timetable')" id="nav-timetable">
+      <div class="sidebar-item" onclick="showPage('timetable')" id="nav-timetable" data-label="Timetable">
         <span class="icon">📅</span><span>Timetable</span>
       </div>
       <div class="sidebar-section">Seating</div>
-      <div class="sidebar-item" onclick="showPage('halls')" id="nav-halls">
+      <div class="sidebar-item" onclick="showPage('halls')" id="nav-halls" data-label="Exam Halls">
         <span class="icon">🏛️</span><span>Exam Halls</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('seating')" id="nav-seating">
+      <div class="sidebar-item" onclick="showPage('seating')" id="nav-seating" data-label="Seating Plan">
         <span class="icon">🪑</span><span>Seating Plan</span>
       </div>
       <div class="sidebar-section">Exam Day</div>
-      <div class="sidebar-item" onclick="showPage('livediary')" id="nav-livediary">
+      <div class="sidebar-item" onclick="showPage('livediary')" id="nav-livediary" data-label="Live Room Diary">
         <span class="icon">📓</span><span>Live Room Diary</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('examday')" id="nav-examday">
+      <div class="sidebar-item" onclick="showPage('examday')" id="nav-examday" data-label="Day Checklist">
         <span class="icon">☑️</span><span>Exam Day Checklist</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('ufm')" id="nav-ufm">
+      <div class="sidebar-item" onclick="showPage('ufm')" id="nav-ufm" data-label="UFM Register">
         <span class="icon">⚠️</span><span>UFM Register</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('lateentry')" id="nav-lateentry">
+      <div class="sidebar-item" onclick="showPage('lateentry')" id="nav-lateentry" data-label="Late Entry">
         <span class="icon">⏰</span><span>Late Entry</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('examsummary')" id="nav-examsummary">
+      <div class="sidebar-item" onclick="showPage('examsummary')" id="nav-examsummary" data-label="Exam Summary">
         <span class="icon">📊</span><span>Exam Summary</span>
       </div>
       <div class="sidebar-section">Duty</div>
-      <div class="sidebar-item" onclick="showPage('invigilator')" id="nav-invigilator">
+      <div class="sidebar-item" onclick="showPage('invigilator')" id="nav-invigilator" data-label="Invigilator">
         <span class="icon">👮</span><span>Invigilator</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('teachers')" id="nav-teachers">
+      <div class="sidebar-item" onclick="showPage('teachers')" id="nav-teachers" data-label="Teachers">
         <span class="icon">👩‍🏫</span><span>Teachers</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('dutycard')" id="nav-dutycard">
+      <div class="sidebar-item" onclick="showPage('dutycard')" id="nav-dutycard" data-label="Duty Cards">
         <span class="icon">🪪</span><span>Duty Cards</span>
       </div>
       <div class="sidebar-section">Students</div>
-      <div class="sidebar-item" onclick="showPage('students')" id="nav-students">
+      <div class="sidebar-item" onclick="showPage('students')" id="nav-students" data-label="Students">
         <span class="icon">👨‍🎓</span><span>Students</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('admitcards')" id="nav-admitcards">
+      <div class="sidebar-item" onclick="showPage('admitcards')" id="nav-admitcards" data-label="Admit Cards">
         <span class="icon">🎫</span><span>Admit Cards</span>
       </div>
       <div class="sidebar-section">Auto</div>
-      <div class="sidebar-item" onclick="showPage('autoassign')" id="nav-autoassign">
+      <div class="sidebar-item" onclick="showPage('autoassign')" id="nav-autoassign" data-label="Auto-Assign">
         <span class="icon">⚡</span><span>Auto-Assign</span>
       </div>
       <div class="sidebar-section">Export</div>
-      <div class="sidebar-item" onclick="showPage('export')" id="nav-export">
+      <div class="sidebar-item" onclick="showPage('export')" id="nav-export" data-label="Data Hub">
         <span class="icon">🗄️</span><span>Data Hub</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('qpaper')" id="nav-qpaper">
+      <div class="sidebar-item" onclick="showPage('qpaper')" id="nav-qpaper" data-label="Question Paper">
         <span class="icon">📝</span><span>Question Paper</span>
       </div>
       <div class="sidebar-section">System</div>
-      <div class="sidebar-item" onclick="showPage('settings')" id="nav-settings">
+      <div class="sidebar-item" onclick="showPage('settings')" id="nav-settings" data-label="Settings">
         <span class="icon">⚙️</span><span>Settings</span>
       </div>
       <div class="sidebar-section">More</div>
-      <div class="sidebar-item" onclick="showPage('qbank')" id="nav-qbank">
+      <div class="sidebar-item" onclick="showPage('qbank')" id="nav-qbank" data-label="Question Bank">
         <span class="icon">📝</span><span>Question Bank</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('parentnotice')" id="nav-parentnotice">
+      <div class="sidebar-item" onclick="showPage('parentnotice')" id="nav-parentnotice" data-label="WhatsApp Notice">
         <span class="icon">🔔</span><span>WhatsApp Notice</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('answerscript')" id="nav-answerscript">
+      <div class="sidebar-item" onclick="showPage('answerscript')" id="nav-answerscript" data-label="Answer Script">
         <span class="icon">📦</span><span>Answer Script</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('circular')" id="nav-circular">
+      <div class="sidebar-item" onclick="showPage('circular')" id="nav-circular" data-label="Circular">
         <span class="icon">📄</span><span>Circular / Notice</span>
       </div>
       <div class="sidebar-section">Exam Print</div>
-      <div class="sidebar-item" onclick="showPage('examdocs')" id="nav-examdocs">
+      <div class="sidebar-item" onclick="showPage('examdocs')" id="nav-examdocs" data-label="Exam Documents">
         <span class="icon">🖨️</span><span>Exam Documents</span>
       </div>
-      <div class="sidebar-item" onclick="showPage('nextexam')" id="nav-nextexam">
+      <div class="sidebar-item" onclick="showPage('nextexam')" id="nav-nextexam" data-label="Next Exam Setup">
         <span class="icon">🗓️</span><span>Next Exam Setup</span>
       </div>
     </div>
@@ -574,6 +602,7 @@ function startApp(name, role, synced) {
 
     // Load dashboard immediately — don't wait for sync check
     showPage('dashboard');
+    restoreSidebarState();
 
     // Preload all collections in background after 1s (don't block dashboard)
     setTimeout(()=>{
@@ -5733,6 +5762,26 @@ function printPreview(html, title='Print') {
 }
 
 // ── DARK MODE ────────────────────────────────────────────────────────────────
+function toggleSidebar() {
+    const sb  = document.getElementById('mainSidebar');
+    const btn = document.getElementById('sidebarToggleBtn');
+    if(!sb) return;
+    const collapsed = sb.classList.toggle('collapsed');
+    if(btn) btn.textContent = collapsed ? '▶' : '☰';
+    // Persist state
+    localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0');
+}
+
+// Restore sidebar state on load
+function restoreSidebarState() {
+    if(localStorage.getItem('sidebar_collapsed') === '1') {
+        const sb  = document.getElementById('mainSidebar');
+        const btn = document.getElementById('sidebarToggleBtn');
+        if(sb)  sb.classList.add('collapsed');
+        if(btn) btn.textContent = '▶';
+    }
+}
+
 function toggleDark() {
     const html = document.documentElement;
     const isDark = html.getAttribute('data-theme') === 'dark';
