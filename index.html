@@ -6968,25 +6968,63 @@ async function renderLiveDiary(el) {
     const sess   = document.getElementById('ld-sess').value;
     if(!examId) return;
 
-    const sp = seatingPlans.find(p=>String(p.examId)===String(examId));
+    // Always fetch fresh from DB (not cached closure variable)
+    const [freshSPs, freshRosters, freshTTs] = await Promise.all([
+      DB.get('seatingPlans'), DB.get('invigilatorRosters'), DB.get('examTimetables')
+    ]);
+
+    const sp      = freshSPs.find(p=>String(p.examId)===String(examId));
+    const roster  = freshRosters.find(r=>String(r.examId)===String(examId));
     const roomSel = document.getElementById('ld-room');
 
-    if(sp && sp.plan) {
-      const rooms = [...new Set(sp.plan.map(p=>p.roomName||p.roomNo||''))].filter(Boolean)
-        .sort((a,b)=>parseInt(a.replace(/\D/g,''))-parseInt(b.replace(/\D/g,'')));
-      roomSel.innerHTML = '<option value="">--Select Room--</option>' +
-        rooms.map(r=>`<option value="${r}">${r}</option>`).join('');
-    } else {
-      roomSel.innerHTML = '<option value="">No seating plan found</option>';
+    let rooms = [];
+
+    // Source 1: seating plan
+    if(sp && sp.plan && sp.plan.length) {
+      rooms = [...new Set(sp.plan.map(p=>
+        p.roomName || p.room || String(p.roomNo||'')
+      ))].filter(Boolean);
     }
 
-    // Subject info
-    const subj = tts.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===sess)
-                    .map(t=>t.subject).filter(Boolean);
+    // Source 2: invigilator roster (fallback)
+    if(!rooms.length && roster && roster.roster && roster.roster.length) {
+      rooms = [...new Set(roster.roster.map(r=>r.hall||r.room||''))].filter(Boolean);
+    }
+
+    // Source 3: halls from DB (last resort)
+    if(!rooms.length) {
+      const halls = await DB.get('halls');
+      rooms = halls.map(h=>h.name||h.id||'').filter(Boolean);
+    }
+
+    // Sort numerically (R-3, R-8, R-10...)
+    rooms.sort((a,b)=>{
+      const na=parseInt(a.replace(/\D/g,''))||0;
+      const nb=parseInt(b.replace(/\D/g,''))||0;
+      return na-nb || a.localeCompare(b);
+    });
+
+    if(rooms.length) {
+      roomSel.innerHTML = '<option value="">--Select Room--</option>' +
+        rooms.map(r=>`<option value="${r}">${r}</option>`).join('');
+      document.getElementById('ld-info') &&
+        (document.getElementById('ld-info').innerHTML =
+          `✅ ${rooms.length}টি room found`);
+    } else {
+      roomSel.innerHTML = '<option value="">⚠️ No rooms found — add seating plan or roster first</option>';
+    }
+
+    // Subject info for this date+session
+    const subj = freshTTs.filter(t=>
+      String(t.examId)===String(examId) &&
+      (t.date===date || !date) &&
+      (t.session===sess || !sess)
+    ).map(t=>t.subject).filter(Boolean);
+
     const infoEl = document.getElementById('ld-info');
-    if(infoEl) infoEl.innerHTML = subj.length
-      ? `📚 Today's subject: <strong>${[...new Set(subj)].join(', ')}</strong>`
-      : `📚 No timetable entry found for ${date} ${sess}`;
+    if(infoEl && subj.length) {
+      infoEl.innerHTML = `📚 <strong>${[...new Set(subj)].join(', ')}</strong> &nbsp;|&nbsp; ${rooms.length} rooms`;
+    }
   };
 
   // ── Load room attendance panel ──
@@ -6997,163 +7035,182 @@ async function renderLiveDiary(el) {
     const room   = document.getElementById('ld-room').value;
     if(!examId || !room) return;
 
-    const sp       = seatingPlans.find(p=>String(p.examId)===String(examId));
-    const roster   = rosters.find(r=>String(r.examId)===String(examId));
-    const examObj  = exams.find(e=>String(e.id)===String(examId));
+    // Fresh fetch
+    const [freshSPs, freshRosters, freshTTs, freshExams] = await Promise.all([
+      DB.get('seatingPlans'), DB.get('invigilatorRosters'),
+      DB.get('examTimetables'), DB.get('exams')
+    ]);
 
-    // Get students for this room+session
-    const roomPlan = sp?.plan?.filter(p=>(p.roomName||p.roomNo||'')===room) || [];
-    const sessKey  = sess.includes('2nd') ? '2nd Half' : '1st Half';
-    const sessData = roomPlan.filter(p=>(p.half||'').includes(sessKey.split(' ')[0]));
+    const sp      = freshSPs.find(p=>String(p.examId)===String(examId));
+    const roster  = freshRosters.find(r=>String(r.examId)===String(examId));
+    const examObj = freshExams.find(e=>String(e.id)===String(examId));
 
-    // Subject & invigilator
-    const subjList = tts.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===sess)
-                        .map(t=>t.subject).filter(Boolean);
-    const invList  = roster?.roster?.filter(r=>r.date===date&&r.hall===room&&
-                       (r.session===sess||r.half===(sess.includes('2nd')?'2H':'1H')))
-                     .map(r=>r.teacherName) || [];
+    // Get all students in this room (ignore session filter — room is shared by sessions)
+    const roomPlan = sp?.plan?.filter(p=>{
+      const rn = p.roomName || p.room || String(p.roomNo||'');
+      return rn === room;
+    }) || [];
 
-    // Load saved attendance
+    // Subject & invigilator for this date+session
+    const subjList = freshTTs.filter(t=>
+      String(t.examId)===String(examId) && t.date===date && t.session===sess
+    ).map(t=>t.subject).filter(Boolean);
+
+    const invList = roster?.roster?.filter(r=>{
+      const hallMatch = (r.hall||r.room||'') === room;
+      const dateMatch = !date || r.date===date;
+      const sessMatch = !sess || r.session===sess || r.half===(sess.includes('2nd')?'2H':'1H');
+      return hallMatch && dateMatch && sessMatch;
+    }).map(r=>r.teacherName) || [];
+
     const savedKey = `att_${examId}_${date}_${sess}_${room}`;
     const saved    = JSON.parse(localStorage.getItem(savedKey)||'{}');
+    const panel    = document.getElementById('ld-panel');
 
-    const panel = document.getElementById('ld-panel');
-
-    // Build student rows from seating plan rolls
+    // Build student rows from seating plan
     let studentRows = '';
     let totalAssigned = 0;
 
-    if(sessData.length) {
-      sessData.forEach(sec => {
-        const rollsStr = sec.rolls||sec.rollNumbers||'';
-        // Parse roll ranges like "1–25, 27–30"
-        const rolls = [];
-        rollsStr.split(',').forEach(part => {
-          part = part.trim();
-          const m = part.match(/(\d+)\s*[–\-]\s*(\d+)/);
-          if(m) { for(let i=parseInt(m[1]);i<=parseInt(m[2]);i++) rolls.push(i); }
-          else if(/^\d+$/.test(part)) rolls.push(parseInt(part));
-        });
+    if(roomPlan.length) {
+      // Group by class/section
+      const groups = {};
+      roomPlan.forEach(p=>{
+        const cls = p.class||p.className||'';
+        const sec = p.section||p.sec||'';
+        const key = `${cls}-${sec}`;
+        if(!groups[key]) groups[key]={cls,sec,rolls:[]};
+        if(p.roll) groups[key].rolls.push(parseInt(p.roll)||p.roll);
+      });
 
-        if(rolls.length) {
-          totalAssigned += rolls.length;
-          const secLabel = `Class ${sec.class||sec.className||''} ${sec.gender||''} Sec ${sec.section||sec.sec||''}`;
-          studentRows += `<tr><td colspan="5" style="padding:6px 10px;background:var(--border);font-weight:600;font-size:11px;color:var(--text-2)">${secLabel} — ${rolls.length} students</td></tr>`;
-          rolls.forEach((roll,i) => {
-            const aKey = `${sec.class||''}_${sec.section||sec.sec||''}_${roll}`;
-            const status = saved[aKey] || 'present';
-            const bg = status==='absent' ? '#fff1f2' : status==='late' ? '#fffbeb' : '';
-            studentRows += `<tr style="background:${bg}" id="ldr_${aKey}">
-              <td style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-2)">${i+1}</td>
-              <td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--primary)">${roll}</td>
-              <td style="padding:6px 10px;font-size:11px">Class ${sec.class||''} / Sec ${sec.section||sec.sec||''}</td>
-              <td style="padding:6px 10px">
-                <div style="display:flex;gap:4px">
-                  <button onclick="ldMark('${aKey}','present','${savedKey}')"
-                    style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
-                    background:${status==='present'?'#059669':'var(--bg)'};color:${status==='present'?'white':'var(--text)'};border-color:${status==='present'?'#059669':'var(--border)'}">
-                    ✓ Present
-                  </button>
-                  <button onclick="ldMark('${aKey}','absent','${savedKey}')"
-                    style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
-                    background:${status==='absent'?'#dc2626':'var(--bg)'};color:${status==='absent'?'white':'var(--text)'};border-color:${status==='absent'?'#dc2626':'var(--border)'}">
-                    ✗ Absent
-                  </button>
-                  <button onclick="ldMark('${aKey}','late','${savedKey}')"
-                    style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
-                    background:${status==='late'?'#d97706':'var(--bg)'};color:${status==='late'?'white':'var(--text)'};border-color:${status==='late'?'#d97706':'var(--border)'}">
-                    ⏰ Late
-                  </button>
-                </div>
-              </td>
-              <td style="padding:6px 10px;text-align:center">
-                <span id="ldst_${aKey}" style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;
-                  background:${status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5'};
-                  color:${status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46'}">
-                  ${status.charAt(0).toUpperCase()+status.slice(1)}
-                </span>
-              </td>
-            </tr>`;
-          });
-        }
+      Object.values(groups).forEach(g=>{
+        if(!g.rolls.length) return;
+        const rolls = [...new Set(g.rolls)].sort((a,b)=>a-b);
+        totalAssigned += rolls.length;
+        const secLabel = `Class ${g.cls}${g.sec?' — Sec '+g.sec:''}`;
+        studentRows += `<tr><td colspan="5" style="padding:6px 10px;background:var(--bg-2);font-weight:600;font-size:11px;color:var(--text-2)">${secLabel} — ${rolls.length} students</td></tr>`;
+        rolls.forEach((roll,i)=>{
+          const aKey = `${g.cls}_${g.sec}_${roll}`;
+          const status = saved[aKey] || 'present';
+          const rowBg  = status==='absent'?'#fff1f2':status==='late'?'#fffbeb':'';
+          studentRows += `<tr style="background:${rowBg}" id="ldr_${aKey}">
+            <td style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-2)">${i+1}</td>
+            <td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--primary)">${roll}</td>
+            <td style="padding:6px 10px;font-size:11px">Class ${g.cls}${g.sec?' / '+g.sec:''}</td>
+            <td style="padding:6px 10px">
+              <div style="display:flex;gap:4px">
+                ${['present','absent','late'].map(s=>`
+                <button onclick="ldMark('${aKey}','${s}','${savedKey}')"
+                  style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
+                  background:${status===s?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--bg)'};
+                  color:${status===s?'white':'var(--text)'};
+                  border-color:${status===s?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--border)'}">
+                  ${s==='present'?'✓ Present':s==='absent'?'✗ Absent':'⏰ Late'}
+                </button>`).join('')}
+              </div>
+            </td>
+            <td style="padding:6px 10px;text-align:center">
+              <span id="ldst_${aKey}" style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;
+                background:${status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5'};
+                color:${status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46'}">
+                ${status.charAt(0).toUpperCase()+status.slice(1)}
+              </span>
+            </td>
+          </tr>`;
+        });
       });
     } else {
-      studentRows = `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-2)">
-        No seating data found for ${room} — ${sess}.<br>
-        <small>Import seating plan from Exam Docs page first.</small>
+      // No seating plan — show roll-number input mode
+      studentRows = `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text-2)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">⚠️ এই room-এর seating plan পাওয়া যায়নি</div>
+        <div style="font-size:12px">Attendance manually mark করতে roll number দিন নিচে:</div>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
+          <input id="ld-manual-roll" placeholder="Roll No" style="padding:7px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);width:100px;font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+          <input id="ld-manual-cls" placeholder="Class" style="padding:7px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);width:80px;font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+          <button class="btn btn-primary btn-sm" onclick="ldManualAdd('${savedKey}')">➕ Add</button>
+        </div>
+        <div id="ld-manual-rows" style="margin-top:8px"></div>
       </td></tr>`;
     }
 
-    // Count present/absent from saved
-    const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+    const counts  = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
     const present = counts.present||0;
     const absent  = counts.absent ||0;
     const late    = counts.late   ||0;
-    const marked  = present+absent+late;
+    const pct     = (present+absent+late)>0 ? Math.round(present/(present+absent+late)*100) : 0;
 
     panel.innerHTML = `
-    <!-- Header Card -->
     <div class="card" style="margin-bottom:12px;border-left:4px solid var(--primary)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
         <div>
           <div style="font-size:18px;font-weight:700;color:var(--primary)">🚪 ${room}</div>
           <div style="font-size:12px;color:var(--text-2);margin-top:2px">
-            ${date} · ${sess} · ${[...new Set(subjList)].join(', ')||'—'}
+            ${date||'—'} · ${sess} · ${[...new Set(subjList)].join(', ')||'—'}
           </div>
-          ${invList.length?`<div style="font-size:12px;color:var(--text-2);margin-top:2px">
-            👮 ${invList.join(' · ')}
-          </div>`:''}
+          ${invList.length?`<div style="font-size:12px;color:var(--text-2);margin-top:2px">👮 ${invList.join(' · ')}</div>`:''}
         </div>
-        <!-- Live Stats -->
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <div id="ld-stat-total" style="text-align:center;background:#eff6ff;border-radius:8px;padding:8px 14px;min-width:70px">
-            <div style="font-size:22px;font-weight:800;color:#1d4ed8">${totalAssigned}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="text-align:center;background:#eff6ff;border-radius:8px;padding:8px 12px;min-width:60px">
+            <div style="font-size:20px;font-weight:800;color:#1d4ed8">${totalAssigned||present+absent+late}</div>
             <div style="font-size:10px;color:#3b82f6">Assigned</div>
           </div>
-          <div id="ld-stat-present" style="text-align:center;background:#f0fdf4;border-radius:8px;padding:8px 14px;min-width:70px">
-            <div style="font-size:22px;font-weight:800;color:#059669" id="ld-cnt-present">${present}</div>
+          <div style="text-align:center;background:#f0fdf4;border-radius:8px;padding:8px 12px;min-width:60px">
+            <div style="font-size:20px;font-weight:800;color:#059669" id="ld-cnt-present">${present}</div>
             <div style="font-size:10px;color:#10b981">Present</div>
           </div>
-          <div id="ld-stat-absent" style="text-align:center;background:#fef2f2;border-radius:8px;padding:8px 14px;min-width:70px">
-            <div style="font-size:22px;font-weight:800;color:#dc2626" id="ld-cnt-absent">${absent}</div>
+          <div style="text-align:center;background:#fef2f2;border-radius:8px;padding:8px 12px;min-width:60px">
+            <div style="font-size:20px;font-weight:800;color:#dc2626" id="ld-cnt-absent">${absent}</div>
             <div style="font-size:10px;color:#ef4444">Absent</div>
           </div>
-          <div id="ld-stat-late" style="text-align:center;background:#fffbeb;border-radius:8px;padding:8px 14px;min-width:70px">
-            <div style="font-size:22px;font-weight:800;color:#d97706" id="ld-cnt-late">${late}</div>
+          <div style="text-align:center;background:#fffbeb;border-radius:8px;padding:8px 12px;min-width:60px">
+            <div style="font-size:20px;font-weight:800;color:#d97706" id="ld-cnt-late">${late}</div>
             <div style="font-size:10px;color:#f59e0b">Late</div>
           </div>
         </div>
       </div>
-      <!-- Mark All buttons -->
-      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-        <button class="btn btn-success btn-sm" onclick="ldMarkAll('present','${savedKey}','${totalAssigned}')">✓ Mark All Present</button>
-        <button class="btn btn-primary btn-sm" onclick="ldPrintDiary('${examId}','${date}','${sess}','${room}','${savedKey}')">🖨️ Print Room Diary</button>
-        <button class="btn btn-warning btn-sm" onclick="ldExportDiary('${examId}','${date}','${sess}','${room}','${savedKey}')">📊 Export Excel</button>
-        <div style="font-size:11px;color:var(--text-2);align-self:center;margin-left:auto">
-          💾 Auto-saved in browser
+      <!-- Progress -->
+      <div style="margin-top:10px">
+        <div style="background:#e5e7eb;border-radius:99px;height:6px;overflow:hidden">
+          <div style="background:#059669;height:100%;width:${pct}%;border-radius:99px;transition:width .3s"></div>
         </div>
+        <div style="font-size:10px;color:var(--text-2);margin-top:3px">${pct}% attendance marked</div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-success btn-sm" onclick="ldMarkAll('present','${savedKey}')">✓ Mark All Present</button>
+        <button class="btn btn-primary btn-sm" onclick="ldPrintDiary('${examId}','${date}','${sess}','${room}','${savedKey}')">🖨️ Print</button>
+        <button class="btn btn-warning btn-sm" onclick="ldExportDiary('${examId}','${date}','${sess}','${room}','${savedKey}')">📊 Export</button>
+        <span style="font-size:10px;color:var(--text-2);align-self:center;margin-left:auto">💾 Auto-saved</span>
       </div>
     </div>
-
-    <!-- Attendance Table -->
     <div class="card" style="padding:0;overflow:hidden">
       <div class="table-wrap">
         <table>
           <thead><tr>
             <th style="width:40px">#</th>
             <th style="width:80px">Roll</th>
-            <th>Class / Section</th>
-            <th>Mark Attendance</th>
+            <th>Class / Sec</th>
+            <th>Attendance</th>
             <th style="width:80px">Status</th>
           </tr></thead>
           <tbody id="ld-tbody">${studentRows}</tbody>
         </table>
       </div>
     </div>`;
+
+    // Manual add for rooms without seating plan
+    window.ldManualAdd = (key) => {
+      const roll = document.getElementById('ld-manual-roll')?.value?.trim();
+      const cls  = document.getElementById('ld-manual-cls')?.value?.trim()||'';
+      if(!roll) return;
+      const aKey = `${cls}__${roll}`;
+      const existing = JSON.parse(localStorage.getItem(key)||'{}');
+      if(!existing[aKey]) { existing[aKey]='present'; localStorage.setItem(key,JSON.stringify(existing)); }
+      ldLoadRoom(); // refresh
+    };
   };
 
-  // ── Mark attendance ──
-  window.ldMark = (key, status, savedKey) => {
+
+
+    window.ldMark = (key, status, savedKey) => {
     const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
     saved[key] = status;
     localStorage.setItem(savedKey, JSON.stringify(saved));
