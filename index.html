@@ -1762,6 +1762,72 @@ async function hallSeedRHS() {
     renderHalls(document.getElementById('mainContent'));
 }
 
+async function seedSeatingPlan1stSummative() {
+    const exams = await DB.get('exams');
+    // Find 1st Summative exam
+    const exam = exams.find(e=>
+        e.name?.toLowerCase().includes('1st') ||
+        e.name?.toLowerCase().includes('first') ||
+        e.id?.includes('excel_')
+    ) || exams[0];
+    if(!exam){ showAlert('No exam found. Create exam first.','error'); return; }
+
+    const RHS_SEATING_1ST = [
+        // BOYS — 1st Half
+        {roomName:'R-10',gender:'BOYS',half:'1st Half',class:'V', section:'A',assigned:25,capacity:25,vacant:0,rolls:'1–2, 4–5, 7–27'},
+        {roomName:'R-12',gender:'BOYS',half:'1st Half',class:'V', section:'A',assigned:24,capacity:24,vacant:0,rolls:'28–51'},
+        {roomName:'R-13',gender:'BOYS',half:'1st Half',class:'V', section:'A',assigned:28,capacity:28,vacant:0,rolls:'52–59'},
+        {roomName:'R-13',gender:'BOYS',half:'1st Half',class:'VI',section:'A',assigned:0, capacity:0, vacant:0,rolls:'1–7, 9–21'},
+        {roomName:'R-14',gender:'BOYS',half:'1st Half',class:'VI',section:'A',assigned:29,capacity:29,vacant:0,rolls:'22–36, 38–47'},
+        {roomName:'R-14',gender:'BOYS',half:'1st Half',class:'VII',section:'A',assigned:0,capacity:0, vacant:0,rolls:'1–2, 4–5'},
+        {roomName:'R-16',gender:'BOYS',half:'1st Half',class:'VII',section:'A',assigned:40,capacity:40,vacant:0,rolls:'6–27, 29–36, 38–47'},
+        {roomName:'R-17',gender:'BOYS',half:'1st Half',class:'VII',section:'A',assigned:56,capacity:60,vacant:4,rolls:'48–50, 53–57'},
+        {roomName:'R-17',gender:'BOYS',half:'1st Half',class:'VIII',section:'A',assigned:0,capacity:0, vacant:0,rolls:'1–15, 17–41, 44–51'},
+        // BOYS — 2nd Half
+        {roomName:'R-10',gender:'BOYS',half:'2nd Half',class:'IX',section:'A',assigned:25,capacity:25,vacant:0,rolls:'1–14, 16–26'},
+        {roomName:'R-12',gender:'BOYS',half:'2nd Half',class:'IX',section:'A',assigned:24,capacity:24,vacant:0,rolls:'27, 29–41, 45, 47, 49, 52–54, 57–58, 60–61'},
+        {roomName:'R-13',gender:'BOYS',half:'2nd Half',class:'IX',section:'A',assigned:28,capacity:28,vacant:0,rolls:'63–88'},
+        {roomName:'R-13',gender:'BOYS',half:'2nd Half',class:'X', section:'A',assigned:0, capacity:0, vacant:0,rolls:'1–2'},
+        {roomName:'R-14',gender:'BOYS',half:'2nd Half',class:'X', section:'A',assigned:29,capacity:29,vacant:0,rolls:'3–14, 16–22, 24–33'},
+        {roomName:'R-16',gender:'BOYS',half:'2nd Half',class:'X', section:'A',assigned:40,capacity:40,vacant:0,rolls:'34–73'},
+        {roomName:'R-17',gender:'BOYS',half:'2nd Half',class:'X', section:'A',assigned:9, capacity:60,vacant:51,rolls:'74–80, 82–83'},
+        // GIRLS — 1st Half
+        {roomName:'R-3', gender:'GIRLS',half:'1st Half',class:'V', section:'B',assigned:30,capacity:30,vacant:0,rolls:'1–5, 7–31'},
+        {roomName:'R-8', gender:'GIRLS',half:'1st Half',class:'V', section:'B',assigned:40,capacity:40,vacant:0,rolls:'32–54'},
+        {roomName:'R-9', gender:'GIRLS',half:'1st Half',class:'VI',section:'B',assigned:28,capacity:28,vacant:0,rolls:'18–45'},
+        {roomName:'R-18',gender:'GIRLS',half:'1st Half',class:'VI',section:'B',assigned:60,capacity:60,vacant:0,rolls:'46–50'},
+        {roomName:'R-18',gender:'GIRLS',half:'1st Half',class:'VII',section:'B',assigned:0,capacity:0, vacant:0,rolls:'1–44, 46, 48–49'},
+        {roomName:'R-18',gender:'GIRLS',half:'1st Half',class:'VIII',section:'B',assigned:0,capacity:0,vacant:0,rolls:'2–9'},
+        {roomName:'R-19',gender:'GIRLS',half:'1st Half',class:'VIII',section:'B',assigned:39,capacity:60,vacant:21,rolls:'10–42, 44, 46–50'},
+        // GIRLS — 2nd Half
+        {roomName:'R-3', gender:'GIRLS',half:'2nd Half',class:'IX',section:'B',assigned:30,capacity:30,vacant:0,rolls:'1–13, 15–31'},
+        {roomName:'R-8', gender:'GIRLS',half:'2nd Half',class:'IX',section:'B',assigned:40,capacity:40,vacant:0,rolls:'32–34, 36–60, 62'},
+        {roomName:'R-9', gender:'GIRLS',half:'2nd Half',class:'X', section:'B',assigned:28,capacity:28,vacant:0,rolls:'12–39'},
+        {roomName:'R-18',gender:'GIRLS',half:'2nd Half',class:'X', section:'B',assigned:27,capacity:60,vacant:33,rolls:'40–43, 45–46, 48–50, 52, 54–58, 62–64, 67, 69–71, 73, 75–76, 78–79'},
+    ];
+
+    const planId = exam.id + '_sp_rhs';
+    const roomNames = [...new Set(RHS_SEATING_1ST.map(r=>r.roomName))];
+    const seatingPlan = {
+        id: planId,
+        examId: exam.id,
+        examName: exam.name,
+        totalHalls: roomNames.length,
+        plan: RHS_SEATING_1ST,
+        source: 'Excel Import — 1st Summative 2026',
+        createdOn: new Date().toISOString()
+    };
+
+    const existing = await DB.get('seatingPlans');
+    const updated  = [...existing.filter(p=>p.id!==planId), seatingPlan];
+    await DB.set('seatingPlans', updated);
+    DB.invalidate('seatingPlans');
+
+    const boysTot  = RHS_SEATING_1ST.filter(r=>r.gender==='BOYS' &&r.assigned>0).reduce((s,r)=>s+r.assigned,0);
+    const girlsTot = RHS_SEATING_1ST.filter(r=>r.gender==='GIRLS'&&r.assigned>0).reduce((s,r)=>s+r.assigned,0);
+    showAlert(`✅ Seating plan saved! Exam: "${exam.name}" | ${roomNames.length} rooms | Boys: ${boysTot} | Girls: ${girlsTot}`,'success');
+}
+
 async function hallClearAll() {
     await DB.set('halls',[]);
     showAlert('All halls cleared.','warning');
@@ -5241,39 +5307,234 @@ async function generateAllCertificates() {
 
 // ── 5. ATTENDANCE SHEET ───────────────────────────────────────────────────────
 async function renderAttendanceSheet(el) {
-    const [exams,halls]=await Promise.all([DB.get('exams'),DB.get('halls')]);
-    const eOpts=exams.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
-    el.innerHTML=`
-    <div class="page-title">✅ Exam Attendance Sheet</div>
-    <div class="card">
-      <div class="form-row">
-        <div class="form-group"><label>Exam *</label>
-          <select id="asExam" onchange="asLoadClasses()"><option value="">--Select--</option>${eOpts}</select>
+    const [exams, seatingPlans, tts, students, settings] = await Promise.all([
+        DB.get('exams'), DB.get('seatingPlans'), DB.get('examTimetables'),
+        DB.get('students'), DB.getObj('settings')
+    ]);
+    const eOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+
+    el.innerHTML = `
+    <div class="page-title">✅ Attendance Register</div>
+    <div style="padding:0 24px 24px">
+
+      <!-- Room-wise from Seating Plan -->
+      <div class="card" style="margin-bottom:14px;border-left:4px solid #059669">
+        <div class="card-title">🏆 Room-wise Attendance Register (Seating Plan থেকে Auto)</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">
+          Seating plan-এর roll number অনুযায়ী — প্রতি room-এর জন্য আলাদা sheet। Student name, signature column সহ।
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Exam *</label>
+            <select id="ar-exam" onchange="arLoadInfo()">
+              <option value="">--Select--</option>${eOpts}
+            </select>
+          </div>
+          <div class="form-group"><label>Date filter (optional)</label>
+            <select id="ar-date"><option value="">All dates</option></select>
+          </div>
+          <div class="form-group"><label>Session</label>
+            <select id="ar-session">
+              <option value="">All Sessions</option>
+              <option value="1st Half">1st Half only</option>
+              <option value="2nd Half">2nd Half only</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group"><label>Class</label>
-          <select id="asClass"><option value="">All Classes</option></select>
-        </div>
-        <div class="form-group"><label>Hall/Room Name</label>
-          <input id="asHall" placeholder="e.g., Main Hall" list="asHallList">
-          <datalist id="asHallList">${halls.map(h=>`<option value="${h.name}">`).join('')}</datalist>
+        <div id="ar-info" style="font-size:12px;color:var(--text-2);margin-bottom:10px"></div>
+        <div class="btn-group">
+          <button class="btn btn-success" onclick="printRoomAttendance()">🖨️ Print Room-wise Register</button>
+          <button class="btn btn-primary" onclick="printRoomAttendance('all-days')">📚 Print All Days (Complete Set)</button>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>Exam Date</label><input type="date" id="asDate"></div>
-        <div class="form-group"><label>Session</label>
-          <select id="asSession">
-            <option value="1st Half">1st Half</option>
-            <option value="2nd Half">2nd Half</option>
-            <option value="Morning">Morning</option>
-            <option value="Afternoon">Afternoon</option>
-          </select>
+
+      <!-- Manual Sheet -->
+      <div class="card">
+        <div class="card-title">✏️ Manual Attendance Sheet</div>
+        <div class="form-row">
+          <div class="form-group"><label>Exam *</label>
+            <select id="asExam" onchange="asLoadClasses()"><option value="">--Select--</option>${eOpts}</select>
+          </div>
+          <div class="form-group"><label>Class</label>
+            <select id="asClass"><option value="">All Classes</option></select>
+          </div>
+          <div class="form-group"><label>Hall/Room</label>
+            <input id="asHall" placeholder="e.g., R-10">
+          </div>
         </div>
-        <div class="form-group"><label>Subject</label>
-          <input id="asSubject" placeholder="e.g., Mathematics">
+        <div class="form-row">
+          <div class="form-group"><label>Date (dd-mm-yyyy)</label><input id="asDate" placeholder="01-04-2026"></div>
+          <div class="form-group"><label>Session</label>
+            <select id="asSession">
+              <option>1st Half</option><option>2nd Half</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Subject</label>
+            <input id="asSubject" placeholder="e.g., Mathematics">
+          </div>
         </div>
+        <button class="btn btn-primary" onclick="generateAttendance()">✅ Generate Sheet</button>
       </div>
-      <button class="btn btn-primary" onclick="generateAttendance()">✅ Generate Attendance Sheet</button>
     </div>`;
+
+    window.arLoadInfo = async () => {
+        const examId = document.getElementById('ar-exam').value;
+        if(!examId){ document.getElementById('ar-info').textContent=''; return; }
+        const sp    = seatingPlans.find(p=>String(p.examId)===String(examId));
+        const examTT= tts.filter(t=>String(t.examId)===String(examId));
+        const dates = [...new Set(examTT.map(t=>t.date))].sort();
+        const dateSel = document.getElementById('ar-date');
+        dateSel.innerHTML = '<option value="">All dates</option>' +
+            dates.map(d=>`<option value="${d}">${d}</option>`).join('');
+        const rooms = sp ? [...new Set(sp.plan.map(r=>r.roomName))].length : 0;
+        const info  = document.getElementById('ar-info');
+        if(sp){
+            info.innerHTML = `✅ Seating plan found: <strong>${rooms} rooms</strong> · <strong>${sp.plan.length} entries</strong> · <strong>${dates.length} exam dates</strong>`;
+            info.style.color = '#065f46';
+        } else {
+            info.innerHTML = `⚠️ এই exam-এর seating plan নেই। Manual sheet ব্যবহার করুন অথবা আগে seating generate করুন।`;
+            info.style.color = '#991b1b';
+        }
+    };
+}
+
+async function printRoomAttendance(mode='single') {
+    const examId  = document.getElementById('ar-exam').value;
+    const dateFilter = document.getElementById('ar-date').value;
+    const sessFilter = document.getElementById('ar-session').value;
+    if(!examId){showAlert('Select exam first.','error');return;}
+
+    const [exams, seatingPlans, tts, students, settings] = await Promise.all([
+        DB.get('exams'), DB.get('seatingPlans'), DB.get('examTimetables'),
+        DB.get('students'), DB.getObj('settings')
+    ]);
+
+    const exam = exams.find(e=>String(e.id)===String(examId));
+    const sp   = seatingPlans.find(p=>String(p.examId)===String(examId));
+    if(!sp || !sp.plan?.length){showAlert('No seating plan found. Generate seating first.','error');return;}
+
+    const sch  = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+    const prin = settings.principalName||'Dasarath Bagdi';
+    const examTT = tts.filter(t=>String(t.examId)===String(examId));
+
+    // Build student lookup by roll
+    const stuMap = {};
+    students.forEach(s=>{ stuMap[String(s.roll)] = s; });
+
+    // Get dates to print for
+    let dates = [...new Set(examTT.map(t=>t.date))].filter(Boolean).sort();
+    if(dateFilter) dates = [dateFilter];
+
+    // Get room names
+    const roomNames = [...new Set(sp.plan.map(r=>r.roomName))].sort();
+
+    // Build one sheet per room per date (per session if filtered)
+    const pages = [];
+
+    for(const date of dates){
+        const dayTT = examTT.filter(t=>t.date===date && (!sessFilter || t.session===sessFilter));
+        if(!dayTT.length && mode!=='all-days') continue;
+
+        // Group by session
+        const sessions = sessFilter ? [sessFilter] :
+            [...new Set(dayTT.map(t=>t.session||'').filter(Boolean))];
+        if(!sessions.length && dayTT.length===0) sessions.push('');
+
+        for(const sess of (sessions.length?sessions:[''])){
+            const sessTT = dayTT.filter(t=>!sess||t.session===sess);
+            // Subject summary for this session
+            const subjSummary = sessTT.map(t=>`Class ${t.className}: ${t.subject} (${t.maxMarks||'—'} marks)`).join(' | ');
+
+            for(const roomName of roomNames){
+                // Get room rows for this session (1H or 2H)
+                const roomRows = sp.plan.filter(r=>
+                    r.roomName===roomName &&
+                    (!sess || (sess.includes('1st')? r.half?.includes('1H')||r.half?.includes('1st')||!r.half : r.half?.includes('2H')||r.half?.includes('2nd')))
+                );
+                if(!roomRows.length) continue;
+
+                // Parse roll ranges into individual students
+                const seatEntries = [];
+                roomRows.forEach(row=>{
+                    const cls = (row.class||'').replace('Class ','').trim();
+                    const sec = row.gender==='M'||row.gender==='Boys'||row.section==='A'?'A':'B';
+                    const rollStr = String(row.rolls||'');
+                    const rolls = [];
+                    rollStr.split(',').forEach(seg=>{
+                        const m = seg.trim().match(/(\d+)[–\-](\d+)/);
+                        if(m){ for(let r=parseInt(m[1]);r<=parseInt(m[2]);r++) rolls.push(r); }
+                        else if(seg.trim()) rolls.push(parseInt(seg.trim())||seg.trim());
+                    });
+                    rolls.forEach(roll=>{
+                        const stu = stuMap[String(roll)];
+                        seatEntries.push({
+                            roll, cls, sec,
+                            name: stu?.name||'',
+                            father: stu?.father||stu?.fatherName||''
+                        });
+                    });
+                });
+
+                if(!seatEntries.length) continue;
+                seatEntries.sort((a,b)=>parseInt(a.roll)-parseInt(b.roll));
+
+                // Build table rows
+                const rowsHtml = seatEntries.map((s,i)=>`
+                <tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
+                  <td style="padding:6px 8px;border:1px solid #B0C4DE;text-align:center;font-size:10pt;color:#475569">${i+1}</td>
+                  <td style="padding:6px 8px;border:1px solid #B0C4DE;font-weight:700;font-size:11pt;color:#1B3A6B">${s.roll}</td>
+                  <td style="padding:6px 8px;border:1px solid #B0C4DE;font-size:10pt">${s.name||'—'}</td>
+                  <td style="padding:6px 8px;border:1px solid #B0C4DE;text-align:center;font-size:10pt">${s.cls}</td>
+                  <td style="padding:6px 8px;border:1px solid #B0C4DE;text-align:center;font-size:10pt">${s.sec}</td>
+                  <td style="padding:6px 8px;border:1px solid #B0C4DE;text-align:center;font-size:12pt;font-weight:700;color:#1B3A6B">__</td>
+                  <td style="padding:6px 8px;border:1px solid #B0C4DE;width:130px"></td>
+                </tr>`).join('');
+
+                const page = offHeader(sch, exam?.name||'', 'ATTENDANCE REGISTER',
+                    `Date: ${date}  |  Session: ${sess||'—'}  |  Room: ${roomName}`, '', '') +
+                `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;font-size:10pt;border:1px solid #B0C4DE;border-radius:6px;padding:10px;background:#F4F8FF">
+                  <div><span style="color:#475569">Room:</span> <strong style="color:#1B3A6B">${roomName}</strong></div>
+                  <div><span style="color:#475569">Date:</span> <strong>${date}</strong></div>
+                  <div><span style="color:#475569">Session:</span> <strong>${sess||'—'}</strong></div>
+                  <div><span style="color:#475569">Total Assigned:</span> <strong>${seatEntries.length}</strong></div>
+                  <div><span style="color:#475569">Subject(s):</span> <span style="font-size:9pt">${subjSummary||'—'}</span></div>
+                  <div><span style="color:#475569">Exam:</span> <span style="font-size:9pt">${exam?.name||'—'}</span></div>
+                </div>
+                <table style="width:100%;border-collapse:collapse;font-size:10pt">
+                  <thead><tr style="background:#1B3A6B;color:white">
+                    <th style="padding:7px 8px;text-align:center">Sl</th>
+                    <th style="padding:7px 8px;text-align:left">Roll No.</th>
+                    <th style="padding:7px 8px;text-align:left">Student Name</th>
+                    <th style="padding:7px 8px;text-align:center">Class</th>
+                    <th style="padding:7px 8px;text-align:center">Sec</th>
+                    <th style="padding:7px 8px;text-align:center">P / A</th>
+                    <th style="padding:7px 8px;text-align:left">Signature</th>
+                  </tr></thead>
+                  <tbody>${rowsHtml}</tbody>
+                  <tfoot><tr style="background:#DCE9F8">
+                    <td colspan="5" style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700;color:#1B3A6B">TOTAL</td>
+                    <td style="padding:7px 8px;border:1px solid #B0C4DE;text-align:center">
+                      <div style="font-size:9pt">P: _____</div>
+                      <div style="font-size:9pt">A: _____</div>
+                    </td>
+                    <td style="padding:7px 8px;border:1px solid #B0C4DE"></td>
+                  </tr></tfoot>
+                </table>
+                <div style="display:flex;justify-content:space-between;margin-top:16px">
+                  <div style="font-size:10pt">
+                    Absentee Roll Nos: _______________________________________________
+                  </div>
+                </div>` +
+                offSignature('Invigilator','',prin,sch) +
+                offFooter(sch, `Attendance Register — ${roomName} — ${date}`);
+
+                pages.push(page);
+            }
+        }
+    }
+
+    if(!pages.length){showAlert('No data to print. Check seating plan and timetable.','warning');return;}
+    offPrint(pages, 'portrait', 'Room-wise Attendance Register');
+    showAlert(`✅ ${pages.length} sheets printing...`, 'success');
 }
 
 async function asLoadClasses() {
@@ -5450,10 +5711,15 @@ async function renderExport(el) {
             <div style="font-size:11px;color:#7c3aed;margin-bottom:8px">41 entries — teacher, class, subject, date</div>
             <button class="btn btn-sm" style="background:#7c3aed;color:white" id="dh-seed-qp" onclick="dhQuickSeed('questionpaper')">📝 Seed QP List</button>
           </div>
+          <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:12px">
+            <div style="font-size:13px;font-weight:600;color:#92400e;margin-bottom:4px">🪑 Seating Plan</div>
+            <div style="font-size:11px;color:#d97706;margin-bottom:8px">11 rooms · Boys+Girls · 1st & 2nd Half · ~651 students</div>
+            <button class="btn btn-sm" style="background:#d97706;color:white" onclick="seedSeatingPlan1stSummative()">🪑 Seed Seating Plan</button>
+          </div>
           <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px">
             <div style="font-size:13px;font-weight:600;color:#9a3412;margin-bottom:4px">🔄 Seed All</div>
             <div style="font-size:11px;color:#c2410c;margin-bottom:8px">উপরের সব একসাথে seed করুন</div>
-            <button class="btn btn-warning btn-sm" onclick="dhQuickSeed('all')">🔄 Seed All</button>
+            <button class="btn btn-warning btn-sm" onclick="dhQuickSeed('all');seedSeatingPlan1stSummative()">🔄 Seed All</button>
           </div>
         </div>
         <div id="dh-seed-status" style="font-size:12px;color:var(--text-2);margin-top:10px"></div>
