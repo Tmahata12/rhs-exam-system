@@ -8241,40 +8241,71 @@ async function renderLiveDiary(el) {
     let studentRows = '';
     let totalAssigned = 0;
 
+    // Helper: parse rolls string like "1–2, 4–5, 7–27, 63–88"
+    const parseRolls = (rollsStr) => {
+      if(!rollsStr || rollsStr==='p') return [];
+      const rolls = [];
+      rollsStr.split(',').forEach(seg=>{
+        seg = seg.trim().replace(/[–—-]/g, '-');
+        if(seg.includes('-')){
+          const [a,b] = seg.split('-').map(s=>parseInt(s.trim()));
+          if(!isNaN(a)&&!isNaN(b)) for(let i=a;i<=b;i++) rolls.push(i);
+        } else {
+          const n = parseInt(seg);
+          if(!isNaN(n)) rolls.push(n);
+        }
+      });
+      return rolls;
+    };
+
+    // Load students for name lookup
+    const allStudents = await DB.get('students').catch(()=>[]);
+
     if(roomPlan.length) {
-      // Group by class/section
-      const groups = {};
-      roomPlan.forEach(p=>{
-        const cls = p.class||p.className||'';
-        const sec = p.section||p.sec||'';
-        const key = `${cls}-${sec}`;
-        if(!groups[key]) groups[key]={cls,sec,rolls:[]};
-        if(p.roll) groups[key].rolls.push(parseInt(p.roll)||p.roll);
+      const sessionFilter = sess; // '1st Half' or '2nd Half'
+      // Filter plan entries for this session
+      const sessionPlan = roomPlan.filter(p => {
+        const phalf = p.half || '';
+        return !phalf || phalf === sessionFilter || phalf.includes(sessionFilter.split(' ')[0]);
       });
 
-      Object.values(groups).forEach(g=>{
-        if(!g.rolls.length) return;
-        const rolls = [...new Set(g.rolls)].sort((a,b)=>a-b);
+      // If no session-specific entries, use all entries for this room
+      const planToUse = sessionPlan.length ? sessionPlan : roomPlan;
+
+      planToUse.forEach(p=>{
+        const cls = p.class||p.className||'';
+        const sec = p.section||p.sec||'';
+        const rolls = parseRolls(p.rolls||p.rollNumbers||'');
+        if(!rolls.length) return;
+
         totalAssigned += rolls.length;
-        const secLabel = `Class ${g.cls}${g.sec?' — Sec '+g.sec:''}`;
+        const secLabel = `Class ${cls}${sec?' — Sec '+sec:''}`;
         studentRows += `<tr><td colspan="5" style="padding:6px 10px;background:var(--bg-2);font-weight:600;font-size:11px;color:var(--text-2)">${secLabel} — ${rolls.length} students</td></tr>`;
+
         rolls.forEach((roll,i)=>{
-          const aKey = `${g.cls}_${g.sec}_${roll}`;
+          const aKey = `${cls}_${sec}_${roll}`;
           const status = saved[aKey] || 'present';
           const rowBg  = status==='absent'?'#fff1f2':status==='late'?'#fffbeb':'';
+          // Find student name
+          const stu = allStudents.find(s=>
+            (s.class===cls||s.classId===cls) &&
+            (s.section===sec||!sec) &&
+            (parseInt(s.roll)===roll||String(s.roll)===String(roll))
+          );
+          const stuName = stu?.name || '';
           studentRows += `<tr style="background:${rowBg}" id="ldr_${aKey}">
             <td style="padding:6px 10px;text-align:center;font-size:11px;color:var(--text-2)">${i+1}</td>
             <td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--primary)">${roll}</td>
-            <td style="padding:6px 10px;font-size:11px">Class ${g.cls}${g.sec?' / '+g.sec:''}</td>
+            <td style="padding:6px 10px;font-size:12px">${stuName?`<strong>${stuName}</strong><br><span style="font-size:10px;color:var(--text-2)">Class ${cls} / ${sec}</span>`:`Class ${cls}${sec?' / '+sec:''}`}</td>
             <td style="padding:6px 10px">
-              <div style="display:flex;gap:4px">
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
                 ${['present','absent','late'].map(s=>`
                 <button onclick="ldMark('${aKey}','${s}','${savedKey}')"
-                  style="padding:3px 10px;border-radius:5px;border:1px solid;cursor:pointer;font-size:11px;font-family:inherit;
-                  background:${status===s?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--bg)'};
+                  style="padding:4px 12px;border-radius:6px;border:1.5px solid;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;
+                  background:${status===s?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--card)'};
                   color:${status===s?'white':'var(--text)'};
                   border-color:${status===s?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--border)'}">
-                  ${s==='present'?'✓ Present':s==='absent'?'✗ Absent':'⏰ Late'}
+                  ${s==='present'?'✓ P':s==='absent'?'✗ A':'⏰ L'}
                 </button>`).join('')}
               </div>
             </td>
@@ -8282,12 +8313,18 @@ async function renderLiveDiary(el) {
               <span id="ldst_${aKey}" style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;
                 background:${status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5'};
                 color:${status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46'}">
-                ${status.charAt(0).toUpperCase()+status.slice(1)}
+                ${status==='present'?'Present':status==='absent'?'Absent':'Late'}
               </span>
             </td>
           </tr>`;
         });
       });
+
+      if(!totalAssigned) {
+        studentRows = `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text-2)">
+          ⚠️ এই session-এর জন্য কোনো student নেই — seating plan-এ half/session মিলছে না
+        </td></tr>`;
+      }
     } else {
       // No seating plan — show roll-number input mode
       studentRows = `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text-2)">
