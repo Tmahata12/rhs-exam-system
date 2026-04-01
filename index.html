@@ -367,6 +367,9 @@ tbody tr:hover td { background:#f5f8ff; }
       <div class="sidebar-item" onclick="showPage('livediary')" id="nav-livediary" data-label="Live Room Diary">
         <span class="icon">📓</span><span>Live Room Diary</span>
       </div>
+      <div class="sidebar-item" onclick="showPage('attendance')" id="nav-attendance" data-label="Attendance Register">
+        <span class="icon">✅</span><span>Attendance Register</span>
+      </div>
       <div class="sidebar-item" onclick="showPage('examday')" id="nav-examday" data-label="Day Checklist">
         <span class="icon">☑️</span><span>Exam Day Checklist</span>
       </div>
@@ -1120,6 +1123,7 @@ async function renderDashboard(el) {
             ['👮','Invigilator','invigilator'],['🖨️','Exam Docs','examdocs'],
             ['📦','Answer Script','answerscript'],['🎫','Admit Cards','admitcards'],
             ['📝','QP Tracking','qpaper'],['🗓️','Next Exam','nextexam'],
+            ['✅','Attendance','attendance'],['📓','Live Diary','livediary'],
             ['⏰','Late Entry','lateentry'],['⚠️','UFM','ufm'],
             ['📊','Exam Summary','examsummary'],['⚙️','Settings','settings'],
           ].map(([icon,label,page])=>`
@@ -7075,26 +7079,30 @@ if(document.fonts&&document.fonts.ready){
  * সব official document-এর shared header
  */
 function offHeader(school, examTitle, docTitle, docSub='', memoNo='', date='') {
-  const dise   = '19250206103';
-  const hsCode = '04178';
-  const phone  = '(03452) 252271';
-  const addr   = 'P.O.- Uttar Ramnagar, P.S.: Aushgram, Dist.: Purba Bardhaman';
+  const s = (() => { try { return JSON.parse(localStorage.getItem('_c_settings')||'[]')[0]||{}; } catch(e){ return {}; } })();
+  const dise   = s.schoolCode  || '19250206103';
+  const hsCode = s.hsCode      || '04178';
+  const idxNo  = s.indexNo     || 'H-1/174';
+  const phone  = s.phone       || '(03452) 252271';
+  const addr   = s.address     || 'P.O.- Uttar Ramnagar, P.S.: Aushgram, Dist.: Purba Bardhaman';
+  const estd   = s.established || '1909';
+  const stype  = s.schoolType  || 'GOVERNMENT SPONSORED';
   const today  = date || new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
-  const logo   = (typeof getSchoolLogo === 'function') ? getSchoolLogo() : (localStorage.getItem('rhs_school_logo')||'');
+  const logo   = localStorage.getItem('rhs_school_logo')||'';
 
   return `
   <div class="off-hdr" style="position:relative">
-    ${logo ? `
-    <div style="position:absolute;left:0;top:0;width:72px;height:72px;display:flex;align-items:center;justify-content:center">
+    ${logo ? `<div style="position:absolute;left:0;top:50%;transform:translateY(-50%);width:72px;text-align:center">
       <img src="${logo}" style="max-width:68px;max-height:68px;object-fit:contain">
     </div>` : ''}
-    <div style="padding-left:${logo?'80px':'0'}">
+    <div style="padding-left:${logo?'80px':'0'};text-align:center">
       <div class="school-name">${school}</div>
       <div class="school-info">
-        Index No.: H-1/174 &nbsp;|&nbsp; DISE Code: ${dise} &nbsp;|&nbsp;
+        Index No.: ${idxNo} &nbsp;|&nbsp; DISE: ${dise} &nbsp;|&nbsp;
         H.S. Code: ${hsCode} &nbsp;|&nbsp; Ph.: ${phone}<br>
         ${addr}
       </div>
+      <div class="school-info" style="font-weight:600;color:#1B3A6B;margin-top:1px">ESTD.: ${estd} | ${stype}</div>
     </div>
     <div class="gold-bar" style="margin:6px 0 4px"></div>
     <div class="doc-title">${docTitle}</div>
@@ -7122,11 +7130,15 @@ function offFooter(school, docTitle='', pageNum='') {
 /**
  * offSignature(left, right, principal)
  */
-function offSignature(left='Exam Controller', right='', principal='Dasarath Bagdi', school='') {
-  const r = right || `${principal}<br><span style="font-size:9pt;color:#475569">Head of Institution${school?', '+school:''}</span>`;
+function offSignature(left='', right='', principal='', school='') {
+  const s = (() => { try { return JSON.parse(localStorage.getItem('_c_settings')||'[]')[0]||{}; } catch(e){ return {}; } })();
+  const ec   = left      || s.examController || 'Exam Controller';
+  const prin = principal || s.principalName  || 'Dasarath Bagdi';
+  const sch  = school    || s.shortName      || s.schoolName || '';
+  const r    = right     || `${prin}<br><span style="font-size:9pt;color:#475569">Head of Institution${sch?', '+sch:''}</span>`;
   return `<div class="off-sig">
     <div class="sig-box">
-      <div class="sig-line">${left}</div>
+      <div class="sig-line">${ec}</div>
     </div>
     <div class="sig-box">
       <div class="sig-line">${r}</div>
@@ -10090,23 +10102,35 @@ async function renderSettings(el) {
   };
 
   window.stPreview = () => {
-    const n  = document.getElementById('st-name').value;
-    const idx= document.getElementById('st-index').value;
-    const dc = document.getElementById('st-dise').value;
-    const hs = document.getElementById('st-hscode').value;
-    const ph = document.getElementById('st-phone').value;
-    const ad = document.getElementById('st-addr').value;
-    const es = document.getElementById('st-estd').value;
-    const tp = document.getElementById('st-type').value;
-    document.getElementById('st-preview').innerHTML = `
-      <div style="text-align:center;border-bottom:3px double #1B3A6B;padding-bottom:10px;margin-bottom:8px">
-        <div style="font-size:15pt;font-weight:700;color:#1B3A6B;font-family:'Noto Serif',Georgia,serif">${n}</div>
-        <div style="font-size:8pt;color:#475569;margin-top:3px;font-family:Arial,sans-serif">
-          Index No.: ${idx} | DISE: ${dc} | H.S. Code: ${hs} | Ph.: ${ph}<br>${ad}
+    const n   = document.getElementById('st-name')?.value||'';
+    const idx = document.getElementById('st-index')?.value||'';
+    const dc  = document.getElementById('st-dise')?.value||'';
+    const hs  = document.getElementById('st-hscode')?.value||'';
+    const ph  = document.getElementById('st-phone')?.value||'';
+    const ad  = document.getElementById('st-addr')?.value||'';
+    const es  = document.getElementById('st-estd')?.value||'';
+    const tp  = document.getElementById('st-type')?.value||'';
+    const pr  = document.getElementById('st-principal')?.value||'';
+    const ec  = document.getElementById('st-examctrl')?.value||'';
+    const logo= localStorage.getItem('rhs_school_logo')||'';
+    const el  = document.getElementById('st-preview');
+    if(!el) return;
+    el.innerHTML = `
+      <div style="text-align:center;border-bottom:3px double #1B3A6B;padding-bottom:10px;margin-bottom:8px;position:relative;font-family:'Noto Serif',Georgia,serif">
+        ${logo?`<img src="${logo}" style="position:absolute;left:0;top:0;max-width:68px;max-height:68px;object-fit:contain">`:''}
+        <div style="padding-left:${logo?'75px':'0'}">
+          <div style="font-size:15pt;font-weight:700;color:#1B3A6B">${n}</div>
+          <div style="font-size:8pt;color:#475569;margin-top:3px;font-family:Arial,sans-serif">
+            Index No.: ${idx} | DISE: ${dc} | H.S. Code: ${hs} | Ph.: ${ph}<br>${ad}
+          </div>
+          <div style="font-size:8pt;color:#1B3A6B;font-weight:600;margin-top:3px;font-family:Arial,sans-serif">ESTD. : ${es} | ${tp}</div>
         </div>
-        <div style="font-size:8pt;color:#1B3A6B;font-weight:600;margin-top:3px;font-family:Arial,sans-serif">ESTD. : ${es} | ${tp}</div>
       </div>
-      <div style="text-align:center;font-size:11pt;font-weight:700;color:#2C4F8C;font-family:Arial,sans-serif">DOCUMENT TITLE</div>`;
+      <div style="text-align:center;font-size:11pt;font-weight:700;color:#2C4F8C;font-family:Arial,sans-serif">DOCUMENT TITLE</div>
+      <div style="display:flex;justify-content:space-between;margin-top:16px;font-size:9pt;color:#475569;font-family:Arial,sans-serif;border-top:1px solid #e2e8f0;padding-top:8px">
+        <span>${ec||'Exam Controller'}: ____________________</span>
+        <span>${pr||'Principal'}<br><span style="font-size:8pt">Head of Institution</span></span>
+      </div>`;
   };
 
   window.stUploadLogo = (event) => {
