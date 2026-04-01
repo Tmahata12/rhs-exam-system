@@ -3138,16 +3138,20 @@ async function renderStudents(el) {
         </select>
         <span id="stu-count" style="font-size:12px;color:var(--text-2);align-self:center">${students.length} students</span>
       </div>
-      <div class="table-wrap" style="max-height:450px;overflow-y:auto;">
+      <div class="table-wrap" style="max-height:500px;overflow-y:auto;">
         <table><thead><tr><th>Roll</th><th>Name</th><th>Class</th><th>Section</th><th>Action</th></tr></thead>
-        <tbody id="stuTbody">${students.length ? students.map(s=>`
+        <tbody id="stuTbody">${students.length ? students.slice(0,200).map(s=>`
           <tr data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
             <td style="font-weight:600;color:var(--primary)">${s.roll}</td>
             <td>${s.name}</td>
             <td style="text-align:center"><span class="badge badge-blue">${s.class||s.classId||'—'}</span></td>
             <td style="text-align:center">${s.section||'—'}</td>
             <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${s.roll}')">🗑️</button></td>
-          </tr>`).join('') : emptyRow(5,'No students yet. Upload Excel to import.')}</tbody>
+          </tr>`).join('') : emptyRow(5,'No students yet. Data Hub → Seed ALL থেকে import করুন.')}
+        ${students.length > 200 ? `<tr><td colspan="5" style="text-align:center;padding:10px;color:var(--text-2);font-size:12px">
+          ... আরো ${students.length-200} জন আছে। Class filter করুন দেখতে।
+        </td></tr>`:''}
+        </tbody>
         </table>
       </div>
     </div></div>`;
@@ -3158,18 +3162,43 @@ function filterStudentsTable() {
     const q   = (document.getElementById('stuSearch')?.value||'').toLowerCase();
     const cls = document.getElementById('stuClassFilter')?.value||'';
     const sec = document.getElementById('stuSecFilter')?.value||'';
+
+    // If filtering, re-render from full list
+    const allStu = window._allStudents||[];
+    if((q || cls || sec) && allStu.length) {
+        const filtered = allStu.filter(s=>{
+            const matchQ   = !q   || (s.name||'').toLowerCase().includes(q) || String(s.roll).includes(q);
+            const matchCls = !cls || (s.class||s.classId||'')===cls;
+            const matchSec = !sec || (s.section||'')===sec;
+            return matchQ && matchCls && matchSec;
+        });
+        const tbody = document.getElementById('stuTbody');
+        if(tbody){
+            tbody.innerHTML = filtered.length ? filtered.map(s=>`
+              <tr data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
+                <td style="font-weight:600;color:var(--primary)">${s.roll}</td>
+                <td>${s.name}</td>
+                <td style="text-align:center"><span class="badge badge-blue">${s.class||s.classId||'—'}</span></td>
+                <td style="text-align:center">${s.section||'—'}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${s.roll}')">🗑️</button></td>
+              </tr>`).join('') :
+              `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-2)">No students found</td></tr>`;
+        }
+        const cnt = document.getElementById('stu-count');
+        if(cnt) cnt.textContent = `${filtered.length} students`;
+        return;
+    }
+
+    // No filter — show/hide existing rows
     const rows = document.querySelectorAll('#stuTbody tr[data-roll]');
     let visible = 0;
     rows.forEach(r=>{
-        const matchQ   = !q   || r.dataset.name?.includes(q) || r.dataset.roll?.includes(q);
-        const matchCls = !cls || r.dataset.class === cls;
-        const matchSec = !sec || r.dataset.sec === sec;
-        const show = matchQ && matchCls && matchSec;
+        const show = true; // no filter active, show all loaded
         r.style.display = show ? '' : 'none';
         if(show) visible++;
     });
     const cnt = document.getElementById('stu-count');
-    if(cnt) cnt.textContent = `${visible} students`;
+    if(cnt) cnt.textContent = `${allStu.length} students`;
 }
 
 async function addStudentItem() {
