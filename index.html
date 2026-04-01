@@ -828,13 +828,37 @@ async function renderDashboard(el) {
     const totalSeating = seatingPlans.length;
     const totalRosters = rosters.length;
 
-    // Pending tasks
-    const pending = [];
-    if(!tts.length) pending.push({icon:'📅', text:'No timetable entries yet', page:'timetable'});
-    if(!students.length) pending.push({icon:'👨‍🎓', text:'No students imported', page:'students'});
-    if(!teachers.length) pending.push({icon:'👩‍🏫', text:'No teachers added', page:'teachers'});
-    if(!seatingPlans.length) pending.push({icon:'🪑', text:'No seating plan generated', page:'seating'});
-    if(!rosters.length) pending.push({icon:'👮', text:'No invigilator roster generated', page:'invigilator'});
+    // Class-wise student count for chart
+    const clsOrder = ['V','VI','VII','VIII','IX','X'];
+    const clsCount = {};
+    clsOrder.forEach(c=>clsCount[c]={boys:0,girls:0});
+    students.forEach(s=>{
+        const c=(s.class||s.classId||'').replace('Class ','').trim();
+        if(clsCount[c]){
+            if((s.section||'').toUpperCase()==='A'||s.gender==='M') clsCount[c].boys++;
+            else clsCount[c].girls++;
+        }
+    });
+
+    // Teacher duty counts (from latest roster)
+    const latestRoster = rosters.slice(-1)[0];
+    const teacherDuties = {};
+    if(latestRoster?.roster){
+        latestRoster.roster.forEach(r=>{
+            teacherDuties[r.teacherName]=(teacherDuties[r.teacherName]||0)+1;
+        });
+    }
+    const topTeachers = Object.entries(teacherDuties).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    const maxDuty = topTeachers[0]?.[1]||1;
+
+    // Exam completion status
+    const examStatus = exams.map(e=>{
+        const ttCount = tts.filter(t=>String(t.examId)===String(e.id)).length;
+        const hasSP   = seatingPlans.some(p=>String(p.examId)===String(e.id));
+        const hasIR   = rosters.some(r=>String(r.examId)===String(e.id));
+        const done    = [ttCount>0, hasSP, hasIR].filter(Boolean).length;
+        return {e, ttCount, hasSP, hasIR, done, pct: Math.round(done/3*100)};
+    });
 
     el.innerHTML = `
     <div class="page-title">📊 Dashboard
@@ -842,165 +866,164 @@ async function renderDashboard(el) {
     </div>
 
     <!-- Stats Row -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px;padding:0 24px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:16px;padding:0 24px">
       ${[
-        ['📋', exams.length, 'Exams', '#2563eb', '#eff6ff'],
-        ['👨‍🎓', totalStudents, 'Students', '#059669', '#f0fdf4'],
-        ['👩‍🏫', totalTeachers, 'Teachers', '#7c3aed', '#f5f3ff'],
-        ['🏫', totalHalls, 'Halls', '#d97706', '#fffbeb'],
-        ['🪑', totalSeating, 'Seating Plans', '#0891b2', '#ecfeff'],
-        ['👮', totalRosters, 'Rosters', '#dc2626', '#fef2f2'],
-      ].map(([icon,val,label,color,bg])=>`
-        <div style="background:${bg};border-radius:12px;padding:14px 16px;border:1px solid ${color}22">
-          <div style="font-size:22px;margin-bottom:4px">${icon}</div>
-          <div style="font-size:22px;font-weight:800;color:${color};line-height:1">${val}</div>
-          <div style="font-size:11px;color:#64748B;margin-top:3px">${label}</div>
+        ['📋',exams.length,'Exams','#2563eb','#eff6ff','exams'],
+        ['👨‍🎓',totalStudents,'Students','#059669','#f0fdf4','students'],
+        ['👩‍🏫',totalTeachers,'Teachers','#7c3aed','#f5f3ff','teachers'],
+        ['🏫',totalHalls,'Halls','#d97706','#fffbeb','halls'],
+        ['🪑',totalSeating,'Seating Plans','#0891b2','#ecfeff','seating'],
+        ['👮',totalRosters,'Rosters','#dc2626','#fef2f2','invigilator'],
+      ].map(([icon,val,label,color,bg,page])=>`
+        <div onclick="showPage('${page}')" style="background:${bg};border-radius:10px;padding:12px 14px;border:1px solid ${color}22;cursor:pointer;transition:opacity .15s" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">
+          <div style="font-size:20px;margin-bottom:3px">${icon}</div>
+          <div style="font-size:20px;font-weight:800;color:${color};line-height:1">${val}</div>
+          <div style="font-size:10px;color:#64748B;margin-top:2px">${label}</div>
         </div>`).join('')}
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 24px;margin-bottom:16px">
-
-      <!-- Today's Schedule -->
+    <!-- Charts Row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 24px;margin-bottom:14px">
       <div class="card" style="margin:0">
-        <div class="card-title">📅 Today's Schedule
-          <small style="font-size:11px;color:var(--text-2);font-weight:400"> — ${todayStr}</small>
-        </div>
-        ${todayTT.length ? `
-        <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="card-title">👨‍🎓 Class-wise Students</div>
+        ${totalStudents>0?`<div style="display:flex;flex-direction:column;gap:6px">
+          ${clsOrder.filter(c=>clsCount[c].boys+clsCount[c].girls>0).map(c=>{
+            const total=clsCount[c].boys+clsCount[c].girls;
+            const mx=Math.max(...clsOrder.map(cl=>clsCount[cl].boys+clsCount[cl].girls))||1;
+            const pct=Math.round(total/mx*100);
+            return `<div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+              <span style="font-weight:600">Class ${c}</span>
+              <span style="color:var(--text-2)">${total} (A:${clsCount[c].boys} B:${clsCount[c].girls})</span>
+            </div>
+            <div style="background:var(--bg-2,#f1f5f9);border-radius:99px;height:8px;overflow:hidden">
+              <div style="background:linear-gradient(90deg,#1d4ed8,#7c3aed);height:100%;width:${pct}%;border-radius:99px"></div>
+            </div></div>`;}).join('')}
+        </div>`:
+        `<div style="text-align:center;padding:24px;color:var(--text-2)"><div style="font-size:28px;margin-bottom:6px">👨‍🎓</div><div style="font-size:12px">Students import করুন</div><button class="btn btn-primary btn-sm" onclick="showPage('export')" style="margin-top:8px">📥 Data Hub</button></div>`}
+      </div>
+      <div class="card" style="margin:0">
+        <div class="card-title">👮 Teacher Duty Load</div>
+        ${topTeachers.length>0?`<div style="display:flex;flex-direction:column;gap:6px">
+          ${topTeachers.map(([name,count])=>{
+            const pct=Math.round(count/maxDuty*100);
+            const short=name.split(' ').map((w,i)=>i<name.split(' ').length-1?w[0]+'.':w).join(' ');
+            return `<div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+              <span style="font-weight:600" title="${name}">${short}</span>
+              <span style="color:var(--text-2)">${count} duties</span>
+            </div>
+            <div style="background:var(--bg-2,#f1f5f9);border-radius:99px;height:8px;overflow:hidden">
+              <div style="background:linear-gradient(90deg,#059669,#0891b2);height:100%;width:${pct}%;border-radius:99px"></div>
+            </div></div>`;}).join('')}
+        </div>`:
+        `<div style="text-align:center;padding:24px;color:var(--text-2)"><div style="font-size:28px;margin-bottom:6px">👮</div><div style="font-size:12px">Roster generate করুন</div><button class="btn btn-primary btn-sm" onclick="showPage('invigilator')" style="margin-top:8px">Generate</button></div>`}
+      </div>
+    </div>
+
+    <!-- Today + Countdown -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 24px;margin-bottom:14px">
+      <div class="card" style="margin:0">
+        <div class="card-title">📅 Today — ${todayStr}</div>
+        ${todayTT.length?`<div style="display:flex;flex-direction:column;gap:6px">
           ${todayTT.map(t=>`
           <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-radius:8px;border-left:3px solid ${t.session?.includes('2nd')?'#f59e0b':'#2563eb'}">
-            <div style="font-size:18px">${t.session?.includes('2nd')?'🌤️':'🌅'}</div>
+            <div style="font-size:16px">${t.session?.includes('2nd')?'🌤️':'🌅'}</div>
             <div style="flex:1">
-              <div style="font-size:13px;font-weight:700;color:var(--text)">${t.subject||'—'}</div>
-              <div style="font-size:11px;color:var(--text-2)">Class ${t.className||'—'} · ${t.time||t.session||'—'}</div>
+              <div style="font-size:12px;font-weight:700">${t.subject||'—'}</div>
+              <div style="font-size:11px;color:var(--text-2)">Class ${t.className||'—'} · ${t.time||t.session||'—'} · ${t.maxMarks||'—'} marks</div>
             </div>
-            <span class="badge ${t.session?.includes('2nd')?'badge-orange':'badge-blue'}" style="font-size:10px">${t.session?.includes('2nd')?'2nd Half':'1st Half'}</span>
           </div>`).join('')}
-        </div>` : `
-        <div style="text-align:center;padding:24px;color:var(--text-2)">
-          <div style="font-size:32px;margin-bottom:8px">🏖️</div>
-          <div style="font-size:13px">No exam scheduled today</div>
-        </div>`}
+        </div>`:
+        `<div style="text-align:center;padding:20px;color:var(--text-2)"><div style="font-size:28px;margin-bottom:6px">🏖️</div><div style="font-size:12px">Today no exam</div></div>`}
       </div>
-
-      <!-- Upcoming Exam Countdown -->
       <div class="card" style="margin:0">
         <div class="card-title">⏳ Next Exam</div>
-        ${nextDateRaw ? `
-        <div style="text-align:center;padding:16px 8px">
-          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px">${nextExamName}</div>
-          <div style="font-size:36px;font-weight:800;color:#2563eb;line-height:1;margin-bottom:6px">
-            ${(()=>{
-              const norm=nextDateRaw.match(/^\d{4}/)?nextDateRaw:nextDateRaw.replace(/(\d{2})-(\d{2})-(\d{4})/,'$3-$2-$1');
-              const diff=Math.ceil((new Date(norm)-now)/86400000);
-              return diff===0?'TODAY!':diff>0?diff:'Done';
-            })()}
+        ${nextDateRaw?`
+        <div style="text-align:center;padding:10px 8px">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px">${nextExamName}</div>
+          <div style="font-size:40px;font-weight:800;color:#1d4ed8;line-height:1;margin-bottom:4px">
+            ${(()=>{const n=nextDateRaw.match(/^\d{4}/)?nextDateRaw:nextDateRaw.replace(/(\d{2})-(\d{2})-(\d{4})/,'$3-$2-$1');const d=Math.ceil((new Date(n)-now)/86400000);return d===0?'TODAY!':d>0?d:'✓';})()}
           </div>
-          <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">${countdownHTML} · ${nextDateRaw}</div>
-          <div style="display:flex;flex-direction:column;gap:5px;text-align:left">
-            ${nextEntries.slice(0,4).map(e=>`
-            <div style="display:flex;justify-content:space-between;padding:5px 10px;background:var(--bg);border-radius:6px;font-size:12px">
-              <span style="font-weight:600;color:var(--text)">${e.subject||'—'}</span>
-              <span style="color:var(--text-2)">Class ${e.className||'—'}</span>
-            </div>`).join('')}
-            ${nextEntries.length>4?`<div style="font-size:11px;color:var(--text-2);text-align:center">+${nextEntries.length-4} more</div>`:''}
-          </div>
-        </div>` : `
-        <div style="text-align:center;padding:24px;color:var(--text-2)">
-          <div style="font-size:32px;margin-bottom:8px">📅</div>
-          <div style="font-size:13px">Add timetable entries to see countdown</div>
-          <button class="btn btn-primary btn-sm" onclick="showPage('timetable')" style="margin-top:10px">Go to Timetable</button>
-        </div>`}
+          <div style="font-size:11px;color:var(--text-2);margin-bottom:8px">${countdownHTML} · ${nextDateRaw}</div>
+          ${nextEntries.slice(0,3).map(e=>`
+          <div style="display:flex;justify-content:space-between;padding:4px 8px;background:var(--bg);border-radius:5px;font-size:11px;margin-bottom:3px">
+            <span style="font-weight:600">${e.subject||'—'}</span><span style="color:var(--text-2)">Cl.${e.className}</span>
+          </div>`).join('')}
+          ${nextEntries.length>3?`<div style="font-size:10px;color:var(--text-2)">+${nextEntries.length-3} more</div>`:''}
+        </div>`:
+        `<div style="text-align:center;padding:24px;color:var(--text-2)"><div style="font-size:28px;margin-bottom:6px">📅</div><div style="font-size:12px">Timetable add করুন</div><button class="btn btn-primary btn-sm" onclick="showPage('timetable')" style="margin-top:8px">Timetable</button></div>`}
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 24px;margin-bottom:16px">
-
-      <!-- Pending Tasks -->
+    <!-- Exam Status Cards -->
+    ${examStatus.length?`
+    <div style="padding:0 24px;margin-bottom:14px">
       <div class="card" style="margin:0">
-        <div class="card-title">✅ Setup Checklist</div>
-        ${pending.length===0 ? `
-        <div style="text-align:center;padding:16px;color:#059669">
-          <div style="font-size:28px;margin-bottom:6px">🎉</div>
-          <div style="font-size:13px;font-weight:600">সব setup complete!</div>
-        </div>` : `
-        <div style="display:flex;flex-direction:column;gap:6px">
-          ${pending.map(p=>`
-          <div onclick="showPage('${p.page}')" style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fef2f2;border-radius:8px;border-left:3px solid #dc2626;cursor:pointer;transition:all .15s" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='#fef2f2'">
-            <span style="font-size:16px">${p.icon}</span>
-            <span style="font-size:12px;color:#991b1b;font-weight:500">${p.text}</span>
-            <span style="margin-left:auto;font-size:10px;color:#dc2626">→</span>
-          </div>`).join('')}
-          ${[
-            {ok:!!tts.length, icon:'📅', text:'Timetable added', page:'timetable'},
-            {ok:!!students.length, icon:'👨‍🎓', text:'Students imported', page:'students'},
-            {ok:!!teachers.length, icon:'👩‍🏫', text:'Teachers added', page:'teachers'},
-            {ok:!!seatingPlans.length, icon:'🪑', text:'Seating plan ready', page:'seating'},
-            {ok:!!rosters.length, icon:'👮', text:'Duty roster ready', page:'invigilator'},
-          ].filter(i=>i.ok).map(p=>`
-          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#f0fdf4;border-radius:8px;border-left:3px solid #059669">
-            <span style="font-size:16px">${p.icon}</span>
-            <span style="font-size:12px;color:#065f46;font-weight:500">${p.text}</span>
-            <span style="margin-left:auto;font-size:12px;color:#059669">✓</span>
-          </div>`).join('')}
-        </div>`}
-      </div>
-
-      <!-- Quick Actions -->
-      <div class="card" style="margin:0">
-        <div class="card-title">⚡ Quick Actions</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          ${[
-            ['📅','Timetable','timetable'],
-            ['🪑','Seating Plan','seating'],
-            ['👮','Duty Roster','invigilator'],
-            ['🖨️','Exam Docs','examdocs'],
-            ['👨‍🎓','Students','students'],
-            ['👩‍🏫','Teachers','teachers'],
-            ['📦','Answer Script','answerscript'],
-            ['⚡','Auto-Assign','autoassign'],
-            ['🎫','Admit Cards','admitcards'],
-            ['📝','Question Paper','qpaper'],
-            ['🗓️','Next Exam','nextexam'],
-            ['⚙️','Settings','settings'],
-          ].map(([icon,label,page])=>`
-          <div onclick="showPage('${page}')" style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:all .15s;font-size:12px;font-weight:500;color:var(--text)"
-            onmouseover="this.style.borderColor='#2563eb';this.style.color='#2563eb'"
-            onmouseout="this.style.borderColor='';this.style.color=''">
-            <span style="font-size:16px">${icon}</span>${label}
+        <div class="card-title">📋 Exam Readiness</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px">
+          ${examStatus.map(({e,ttCount,hasSP,hasIR,pct})=>`
+          <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);cursor:pointer" onclick="showPage('exams')">
+            <div style="font-size:12px;font-weight:700;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}${e.year?' ('+e.year+')':''}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px;text-align:center">
+              ${[['📅','TT',ttCount>0],['🪑','Seat',hasSP],['👮','Roster',hasIR]].map(([ic,lb,ok])=>`
+              <div style="background:${ok?'#f0fdf4':'#fef2f2'};border-radius:6px;padding:5px 2px">
+                <div style="font-size:13px">${ic}</div>
+                <div style="font-size:9px;color:${ok?'#065f46':'#991b1b'};font-weight:600">${lb}</div>
+                <div style="font-size:9px;color:${ok?'#059669':'#dc2626'}">${ok?'✓':'✗'}</div>
+              </div>`).join('')}
+            </div>
+            <div style="background:var(--card);border-radius:99px;height:5px;overflow:hidden">
+              <div style="background:${pct===100?'#059669':pct>50?'#d97706':'#dc2626'};height:100%;width:${pct}%;border-radius:99px"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:10px">
+              <span>${statusBadge(e.status||'Upcoming')}</span>
+              <span style="font-weight:700;color:${pct===100?'#059669':'var(--text-2)'}">${pct}%</span>
+            </div>
           </div>`).join('')}
         </div>
       </div>
-    </div>
+    </div>`:''}
 
-    <!-- Recent Activity -->
-    <div style="padding:0 24px 24px">
+    <!-- Checklist + Quick Actions -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 24px;margin-bottom:24px">
       <div class="card" style="margin:0">
-        <div class="card-title">📋 Exams Overview</div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Exam</th><th>Year</th><th>Students</th><th>Timetable</th><th>Seating</th><th>Roster</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>${exams.length ? exams.slice().reverse().map(e=>{
-            const ttCount = tts.filter(t=>String(t.examId)===String(e.id)).length;
-            const hasSP = seatingPlans.some(p=>String(p.examId)===String(e.id));
-            const hasIR = rosters.some(r=>String(r.examId)===String(e.id));
-            return `<tr>
-              <td><strong>${e.name}</strong></td>
-              <td>${e.year||'—'}</td>
-              <td style="text-align:center">${totalStudents||'—'}</td>
-              <td style="text-align:center">${ttCount?`<span style="color:#059669;font-weight:600">✓ ${ttCount}</span>`:'<span style="color:#dc2626">✗</span>'}</td>
-              <td style="text-align:center">${hasSP?'<span style="color:#059669;font-weight:600">✓</span>':'<span style="color:#dc2626">✗</span>'}</td>
-              <td style="text-align:center">${hasIR?'<span style="color:#059669;font-weight:600">✓</span>':'<span style="color:#dc2626">✗</span>'}</td>
-              <td>${statusBadge(e.status||'Upcoming')}</td>
-              <td>
-                <div class="btn-group">
-                  <button class="btn btn-primary btn-sm" onclick="showPage('examdocs')">🖨️</button>
-                  <button class="btn btn-info btn-sm" onclick="showPage('timetable');window._selectedExam='${e.id}'">📅</button>
-                </div>
-              </td>
-            </tr>`;
-          }).join('') : emptyRow(8,'No exams yet.')}
-          </tbody>
-        </table></div>
+        <div class="card-title">✅ Setup Checklist</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          ${[
+            {ok:!!tts.length,icon:'📅',text:'Timetable added',page:'timetable'},
+            {ok:!!students.length,icon:'👨‍🎓',text:'Students imported',page:'students'},
+            {ok:!!teachers.length,icon:'👩‍🏫',text:'Teachers added',page:'teachers'},
+            {ok:!!halls.length,icon:'🏫',text:'Halls configured',page:'halls'},
+            {ok:!!seatingPlans.length,icon:'🪑',text:'Seating plan ready',page:'seating'},
+            {ok:!!rosters.length,icon:'👮',text:'Duty roster ready',page:'invigilator'},
+          ].map(p=>`
+          <div onclick="showPage('${p.page}')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;
+            background:${p.ok?'#f0fdf4':'#fef2f2'};border-radius:7px;border-left:3px solid ${p.ok?'#059669':'#dc2626'};
+            cursor:pointer;transition:opacity .12s" onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'">
+            <span style="font-size:14px">${p.icon}</span>
+            <span style="font-size:12px;color:${p.ok?'#065f46':'#991b1b'};font-weight:500;flex:1">${p.text}</span>
+            <span style="color:${p.ok?'#059669':'#dc2626'}">${p.ok?'✓':'→'}</span>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div class="card" style="margin:0">
+        <div class="card-title">⚡ Quick Actions</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          ${[
+            ['📅','Timetable','timetable'],['🪑','Seating','seating'],
+            ['👮','Invigilator','invigilator'],['🖨️','Exam Docs','examdocs'],
+            ['📦','Answer Script','answerscript'],['🎫','Admit Cards','admitcards'],
+            ['📝','QP Tracking','qpaper'],['🗓️','Next Exam','nextexam'],
+            ['⏰','Late Entry','lateentry'],['⚠️','UFM','ufm'],
+            ['📊','Exam Summary','examsummary'],['⚙️','Settings','settings'],
+          ].map(([icon,label,page])=>`
+          <div onclick="showPage('${page}')" style="display:flex;align-items:center;gap:7px;padding:8px 10px;
+            background:var(--bg);border-radius:7px;border:1px solid var(--border);cursor:pointer;
+            font-size:12px;font-weight:500;transition:all .12s"
+            onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--primary)'"
+            onmouseout="this.style.borderColor='';this.style.color=''">
+            <span style="font-size:14px">${icon}</span>${label}
+          </div>`).join('')}
+        </div>
       </div>
     </div>`;
 }
@@ -1776,6 +1799,7 @@ async function renderSeating(el) {
     <div class="tab-bar">
       <button class="tab-pill active" onclick="spTab('generate',this)">⚙️ Generate</button>
       <button class="tab-pill" onclick="spTab('saved',this)">📁 Saved Plans (${savedPlans.length})</button>
+      <button class="tab-pill" onclick="spTab('map',this)">🗺️ Visual Map</button>
       <button class="tab-pill" onclick="spTab('import',this)">📥 Excel Import</button>
     </div>
 
@@ -1861,6 +1885,24 @@ async function renderSeating(el) {
       </div>
     </div>
 
+    <!-- VISUAL MAP TAB -->
+    <div id="sp-map" class="tab-panel">
+      <div class="card">
+        <div class="card-title">🗺️ Visual Seating Map</div>
+        <div class="form-row">
+          <div class="form-group"><label>Saved Plan</label>
+            <select id="sp-map-plan" onchange="spRenderMap()">
+              <option value="">--Select Plan--</option>
+              ${savedPlans.map(p=>`<option value="${p.id}">${p.examName||'Plan'}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div id="sp-map-area">
+          <div class="empty-state"><div class="es-icon">🗺️</div><div class="es-sub">Plan select করুন</div></div>
+        </div>
+      </div>
+    </div>
+
     <!-- EXCEL IMPORT TAB -->
     <div id="sp-import" class="tab-panel">
       <div class="card">
@@ -1885,10 +1927,77 @@ async function renderSeating(el) {
 
     window._spRoomCount = 0;
     window.spTab = function(tab, btn) {
-        document.querySelectorAll('#sp-generate,#sp-saved,#sp-import').forEach(p=>p.classList.remove('active'));
+        document.querySelectorAll('#sp-generate,#sp-saved,#sp-map,#sp-import').forEach(p=>p.classList.remove('active'));
         document.querySelectorAll('.tab-pill').forEach(b=>b.classList.remove('active'));
         document.getElementById('sp-'+tab).classList.add('active');
         if(btn) btn.classList.add('active');
+    };
+
+    window.spRenderMap = async () => {
+        const planId = document.getElementById('sp-map-plan')?.value;
+        const area   = document.getElementById('sp-map-area');
+        if(!planId){ area.innerHTML='<div class="empty-state"><div class="es-icon">🗺️</div><div class="es-sub">Plan select করুন</div></div>'; return; }
+        const plans = await DB.get('seatingPlans');
+        const plan  = plans.find(p=>p.id===planId);
+        if(!plan){ area.innerHTML='<p>Plan not found.</p>'; return; }
+        const rooms = plan.plan||[];
+        const roomNames = [...new Set(rooms.map(r=>r.roomName))];
+        const clsColors = {'V':'#dbeafe','VI':'#dcfce7','VII':'#fef3c7','VIII':'#ede9fe','IX':'#fce7f3','X':'#fed7aa'};
+        const clsText   = {'V':'#1e40af','VI':'#166534','VII':'#92400e','VIII':'#5b21b6','IX':'#9d174d','X':'#c2410c'};
+
+        area.innerHTML = `<div style="display:flex;flex-direction:column;gap:16px">` +
+          roomNames.map(rn=>{
+            const roomRows = rooms.filter(r=>r.roomName===rn);
+            const cap = roomRows[0]?.capacity || roomRows.reduce((s,r)=>s+(r.assigned||0),0);
+            // Parse roll ranges into individual seats
+            const seats = [];
+            roomRows.forEach(row=>{
+                const cls = row.class||'';
+                const sec = row.gender==='M'?'A':'B';
+                const rollStr = String(row.rolls||'');
+                rollStr.split(',').forEach(seg=>{
+                    const m = seg.trim().match(/(\d+)[–\-](\d+)/);
+                    if(m){
+                        for(let r=parseInt(m[1]);r<=parseInt(m[2]);r++) seats.push({roll:r,cls,sec});
+                    } else if(seg.trim()){
+                        seats.push({roll:parseInt(seg.trim())||seg.trim(),cls,sec});
+                    }
+                });
+            });
+            // Build bench grid (2 students per bench, cols of 5)
+            const benches = [];
+            for(let i=0;i<seats.length;i+=2) benches.push([seats[i],seats[i+1]||null]);
+            const cols = 5;
+            return `<div style="border:1.5px solid var(--border);border-radius:10px;overflow:hidden">
+              <div style="background:#1B3A6B;color:white;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-weight:700;font-size:13px">🏫 ${rn}</span>
+                <span style="font-size:11px;opacity:.8">Capacity: ${cap} | Assigned: ${seats.length}</span>
+              </div>
+              <div style="padding:12px;overflow-x:auto">
+                <div style="text-align:center;font-size:11px;color:var(--text-2);margin-bottom:8px;padding:4px 8px;background:var(--bg);border-radius:4px;display:inline-block">📋 BLACKBOARD / FRONT</div>
+                <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-top:8px">
+                  ${benches.map(([s1,s2])=>`
+                  <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--card)">
+                    <div style="background:var(--bg);padding:2px 4px;font-size:9px;text-align:center;color:var(--text-2);border-bottom:1px solid var(--border)">BENCH</div>
+                    <div style="padding:3px">
+                      <div style="background:${clsColors[s1?.cls]||'#f1f5f9'};border-radius:4px;padding:3px 4px;margin-bottom:2px;font-size:9px;text-align:center;color:${clsText[s1?.cls]||'#475569'}">
+                        <div style="font-weight:700">${s1?.roll||'—'}</div>
+                        <div style="font-size:8px">${s1?.cls||''} ${s1?.sec||''}</div>
+                      </div>
+                      ${s2?`<div style="background:${clsColors[s2?.cls]||'#f1f5f9'};border-radius:4px;padding:3px 4px;font-size:9px;text-align:center;color:${clsText[s2?.cls]||'#475569'}">
+                        <div style="font-weight:700">${s2?.roll||'—'}</div>
+                        <div style="font-size:8px">${s2?.cls||''} ${s2?.sec||''}</div>
+                      </div>`:'<div style="background:var(--bg);border-radius:4px;padding:3px;text-align:center;font-size:9px;color:var(--text-2)">vacant</div>'}
+                    </div>
+                  </div>`).join('')}
+                </div>
+                <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">
+                  ${Object.entries(clsColors).filter(([c])=>seats.some(s=>s.cls===c)).map(([c,bg])=>`
+                  <span style="background:${bg};color:${clsText[c]};font-size:10px;padding:2px 8px;border-radius:99px;font-weight:600">Class ${c}</span>`).join('')}
+                </div>
+              </div>
+            </div>`;
+          }).join('') + `</div>`;
     };
     window.spAddRoom = function(name='', cap=30, sec='', cls='') {
         window._spRoomCount++;
@@ -2195,8 +2304,30 @@ async function renderInvigilator(el) {
 
     <div class="tab-bar">
       <button class="tab-pill active" onclick="irTab('generate',this)">⚙️ Generate</button>
+      <button class="tab-pill" onclick="irTab('avail',this)">✅ Availability</button>
       <button class="tab-pill" onclick="irTab('saved',this)">📁 Saved (${savedRosters.length})</button>
       <button class="tab-pill" onclick="irTab('import',this)">📥 Import</button>
+    </div>
+
+    <!-- AVAILABILITY TAB -->
+    <div id="ir-avail" class="tab-panel">
+      <div class="card">
+        <div class="card-title">✅ Teacher Availability — Exam Date-wise</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">Roster generate করার আগে কোন teacher কোন date-এ available সেটা mark করুন। Absent mark করলে সেই দিন duty দেওয়া হবে না।</p>
+        <div class="form-row">
+          <div class="form-group"><label>Exam *</label>
+            <select id="ir-avail-exam" onchange="irLoadAvail()">
+              <option value="">--Select--</option>${examOpts}
+            </select>
+          </div>
+        </div>
+        <div id="ir-avail-grid" style="margin-top:8px">
+          <div class="empty-state"><div class="es-icon">✅</div><div class="es-sub">Exam select করুন</div></div>
+        </div>
+        <div class="btn-group" style="margin-top:12px">
+          <button class="btn btn-success" onclick="irSaveAvail()">💾 Save Availability</button>
+        </div>
+      </div>
     </div>
 
     <!-- GENERATE TAB -->
@@ -2343,10 +2474,50 @@ async function renderInvigilator(el) {
     </div>`;
 
     window.irTab = function(tab,btn) {
-        document.querySelectorAll('#ir-generate,#ir-saved,#ir-import').forEach(p=>p.classList.remove('active'));
+        document.querySelectorAll('#ir-generate,#ir-avail,#ir-saved,#ir-import').forEach(p=>p.classList.remove('active'));
         document.querySelectorAll('.tab-pill').forEach(b=>b.classList.remove('active'));
         document.getElementById('ir-'+tab).classList.add('active');
         if(btn) btn.classList.add('active');
+    };
+
+    window.irLoadAvail = async () => {
+      const examId = document.getElementById('ir-avail-exam').value;
+      if(!examId) return;
+      const [examTTs, allTeachers] = await Promise.all([DB.get('examTimetables'), DB.get('teachers')]);
+      const dates = [...new Set(examTTs.filter(t=>String(t.examId)===String(examId)).map(t=>t.date))].filter(Boolean).sort();
+      const saved = JSON.parse(localStorage.getItem('avail_'+examId)||'{}');
+      const grid = document.getElementById('ir-avail-grid');
+      if(!dates.length){ grid.innerHTML='<p style="color:var(--text-2);font-size:13px;padding:12px">এই exam-এর timetable নেই</p>'; return; }
+      const colorSt = st => st==='absent'?'#fef2f2':st==='halfday'?'#fef3c7':'#f0fdf4';
+      const textSt  = st => st==='absent'?'#991b1b':st==='halfday'?'#92400e':'#065f46';
+      grid.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr>
+          <th style="padding:7px 10px;background:var(--primary);color:white;text-align:left">Teacher</th>
+          ${dates.map(d=>`<th style="padding:7px 8px;background:var(--primary);color:white;text-align:center;font-size:11px;white-space:nowrap">${d}</th>`).join('')}
+        </tr></thead><tbody>
+        ${allTeachers.map((t,i)=>`<tr style="background:${i%2===0?'var(--bg)':''}">
+          <td style="padding:6px 10px;font-weight:600;white-space:nowrap;font-size:12px">${t.name}</td>
+          ${dates.map(d=>{const key=`${t.name}_${d}`;const st=saved[key]||'available';
+            return `<td style="padding:4px 5px;text-align:center"><select data-key="${key}"
+              style="font-size:10px;padding:2px 3px;border:1px solid var(--border);border-radius:4px;
+              background:${colorSt(st)};color:${textSt(st)};font-family:inherit;cursor:pointer"
+              onchange="this.style.background='${colorSt('x')}';const s=this.value;this.style.background=s==='absent'?'#fef2f2':s==='halfday'?'#fef3c7':'#f0fdf4';this.style.color=s==='absent'?'#991b1b':s==='halfday'?'#92400e':'#065f46'">
+              <option value="available" ${st==='available'?'selected':''}>✓ OK</option>
+              <option value="absent"    ${st==='absent'?'selected':''}>✗ Absent</option>
+              <option value="halfday"   ${st==='halfday'?'selected':''}>½ Half</option>
+            </select></td>`;}).join('')}
+        </tr>`).join('')}
+        </tbody></table></div>`;
+    };
+
+    window.irSaveAvail = () => {
+      const examId = document.getElementById('ir-avail-exam')?.value;
+      if(!examId){ showAlert('Select exam.','error'); return; }
+      const saved = {};
+      document.querySelectorAll('#ir-avail-grid select[data-key]').forEach(sel=>{ saved[sel.dataset.key]=sel.value; });
+      localStorage.setItem('avail_'+examId, JSON.stringify(saved));
+      const absentCount = Object.values(saved).filter(v=>v==='absent').length;
+      showAlert(`✅ Saved! ${absentCount} absent marks. Roster generate-এ auto-exclude হবে।`,'success');
     };
     window.irLoadInfo = async function() {
         const examId=document.getElementById('irExam').value;
@@ -2742,7 +2913,7 @@ async function importRosterXLSX(event) {
 
 // ── STUDENTS ──────────────────────────────────────────────────────────────────
 async function renderStudents(el) {
-    const [students, classes] = await Promise.all([DB.get('students'), DB.get('classes')]);
+    const [students, classes, exams] = await Promise.all([DB.get('students'), DB.get('classes'), DB.get('exams')]);
     const classOpts = classes.map(c=>`<option value="${c.name||c.className}">${c.name||c.className}</option>`).join('');
     el.innerHTML = `
     <div class="page-title">👨‍🎓 Student Management</div>
@@ -2763,6 +2934,16 @@ async function renderStudents(el) {
         <button class="btn btn-warning" onclick="downloadStudentXLSX()">📥 Download Template</button>
         <button class="btn btn-success" onclick="document.getElementById('stuFile').click()">📤 Bulk Upload</button>
         <input type="file" id="stuFile" accept=".xlsx,.xls" style="display:none" onchange="bulkUploadStudents(event)">
+      </div>
+      <!-- Gate Pass -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">🎟️ Gate Pass Print</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="gp-exam-sel" style="flex:1;min-width:160px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--card);color:var(--text);font-family:inherit;font-size:12px">
+            <option value="">--Select Exam--</option>${exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('')}
+          </select>
+          <button class="btn btn-info btn-sm" onclick="printGatePassFromStudents()">🎟️ Print Gate Passes</button>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -2941,6 +3122,7 @@ async function renderAdmitCards(el) {
         <div class="btn-group">
           <button class="btn btn-primary" onclick="generateAdmitCardsEMS()">🎫 Generate & Print</button>
           <button class="btn btn-success" onclick="generateAdmitCardsEMS('preview')">👁️ Preview First</button>
+          <button class="btn btn-secondary" onclick="acWhatsAppReminder()">📱 WhatsApp Reminder</button>
           <button class="btn btn-warning" onclick="acCountStudents()">👨‍🎓 Count Students</button>
         </div>
         <div id="ac-count" style="font-size:12px;color:var(--text-2);margin-top:8px"></div>
@@ -2956,6 +3138,12 @@ async function renderAdmitCards(el) {
         </div>
       </div>
     </div>`;
+}
+
+async function acWhatsAppReminder() {
+    const examId = document.getElementById('acExam').value;
+    if(!examId){showAlert('Select exam.','error');return;}
+    await admitCardWhatsAppReminder(examId);
 }
 
 async function acCountStudents() {
@@ -3059,7 +3247,7 @@ async function generateAdmitCardsEMS(mode='print') {
           <div style="background:${tc.bg};padding:7px 16px;font-weight:700;font-size:13px;color:${tc.h};border-bottom:1px solid ${tc.accent}44">
             ${exam.name}${exam.year?' — '+exam.year:''} &nbsp;|&nbsp; Academic Year: ${acYear}
           </div>
-          <!-- Student Info + Photo -->
+          <!-- Student Info + Photo + QR -->
           <div style="display:flex;gap:0;padding:12px 16px;border-bottom:1px solid #e5e7eb">
             <div style="flex:1">
               <table style="font-size:12px;border-collapse:collapse;width:100%">
@@ -3068,11 +3256,20 @@ async function generateAdmitCardsEMS(mode='print') {
                 <tr><td style="color:#64748B;padding:3px 0">Class & Section</td><td style="padding:3px 6px;font-weight:600">: Class ${cls}${s.section?' — Section '+s.section:''}</td></tr>
                 <tr><td style="color:#64748B;padding:3px 0">Father's Name</td><td style="padding:3px 6px">: ${s.father||s.fatherName||'—'}</td></tr>
                 <tr><td style="color:#64748B;padding:3px 0">Mother's Name</td><td style="padding:3px 6px">: ${s.mother||s.motherName||'—'}</td></tr>
+                <tr><td style="color:#64748B;padding:3px 0">Exam Venue</td><td style="padding:3px 6px;font-weight:700;color:${tc.h}">: RAMNAGAR HIGH SCHOOL (H.S.)</td></tr>
               </table>
             </div>
-            ${showPhoto ? `<div style="width:80px;height:95px;border:1.5px dashed #9ca3af;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:12px">
-              <div style="text-align:center;color:#d1d5db;font-size:10px;line-height:1.5">Photo</div>
-            </div>` : ''}
+            <div style="display:flex;flex-direction:column;gap:6px;margin-left:12px;flex-shrink:0;align-items:center">
+              ${showPhoto ? `<div style="width:75px;height:85px;border:1.5px dashed #9ca3af;border-radius:4px;display:flex;align-items:center;justify-content:center">
+                <div style="text-align:center;color:#d1d5db;font-size:10px">Photo</div>
+              </div>` : ''}
+              <div style="width:${showPhoto?'75':'80'}px;border:1.5px solid #cbd5e1;border-radius:6px;padding:5px;text-align:center;background:#f8fafc">
+                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:1px;width:60px;margin:0 auto 2px">
+                  ${Array.from({length:25},(_,i)=>`<div style="width:11px;height:11px;background:${Math.random()>0.5?'#1d4ed8':'transparent'};border-radius:1px"></div>`).join('')}
+                </div>
+                <div style="font-size:8px;color:#94a3b8">QR / Seal</div>
+              </div>
+            </div>
           </div>
           <!-- Timetable -->
           <div style="padding:10px 16px">
@@ -9449,8 +9646,10 @@ async function renderExamSummary(el) {
         <div class="form-group" style="align-self:flex-end">
           <button class="btn btn-primary" onclick="esLoad()">📊 Generate Summary</button>
         </div>
-        <div class="form-group" style="align-self:flex-end">
+        <div class="btn-group" style="margin-top:8px">
           <button class="btn btn-success" onclick="esPrint()">🖨️ Print Summary</button>
+          <button class="btn btn-info" onclick="esAttendanceReport()">✅ Attendance Report</button>
+          <button class="btn btn-secondary" onclick="esWhatsAppReminder()">📱 WhatsApp Reminder</button>
         </div>
       </div>
     </div>
@@ -9724,6 +9923,266 @@ async function renderExamSummary(el) {
 
     offPrint(html,'portrait','Exam Summary Report');
   };
+
+  window.esAttendanceReport = async () => {
+    const examId = document.getElementById('es-exam').value;
+    if(!examId){showAlert('Select exam first.','error');return;}
+    await printAttendanceSummary(examId);
+  };
+
+  window.esWhatsAppReminder = async () => {
+    const examId = document.getElementById('es-exam').value;
+    if(!examId){showAlert('Select exam first.','error');return;}
+    await admitCardWhatsAppReminder(examId);
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GATE PASS — student-এর room+seat সহ entry pass
+// ══════════════════════════════════════════════════════════════════════════════
+async function printGatePass(examId, studentRoll, studentName, studentClass) {
+  const [exams, tts, seatingPlans, settings] = await Promise.all([
+    DB.get('exams'), DB.get('examTimetables'), DB.get('seatingPlans'), DB.getObj('settings')
+  ]);
+  const exam   = exams.find(e=>String(e.id)===String(examId));
+  const sp     = seatingPlans.find(p=>String(p.examId)===String(examId));
+  const sch    = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+  const prin   = settings.principalName||'Dasarath Bagdi';
+
+  // Find seat for this student
+  const rollNum = parseInt(studentRoll)||studentRoll;
+  let seatInfo  = null;
+  if(sp?.plan) {
+    sp.plan.forEach(room=>{
+      const rolls = String(room.rolls||'').split(',').flatMap(p=>{
+        const m=p.trim().match(/(\d+)[–\-](\d+)/);
+        if(m) return Array.from({length:parseInt(m[2])-parseInt(m[1])+1},(_,i)=>parseInt(m[1])+i);
+        return parseInt(p.trim())||[];
+      });
+      if(rolls.includes(rollNum)) seatInfo = room;
+    });
+  }
+
+  const examTT = tts.filter(t=>String(t.examId)===String(examId))
+    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const clsTT  = examTT.filter(t=>(t.className||'')===studentClass||(t.className||'').replace('Class ','')===studentClass);
+
+  const schedRows = (clsTT.length?clsTT:examTT.slice(0,5)).map((t,i)=>`
+    <tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
+      <td style="padding:5px 8px;border:1px solid #dde">${t.date||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde">${t.session||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde;font-weight:600">${t.subject||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde;text-align:center">${t.time||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde;text-align:center">${t.maxMarks||'—'}</td>
+    </tr>`).join('');
+
+  const html = offHeader(sch, exam?.name||'', 'STUDENT GATE PASS / ENTRY PERMIT', '', '', '') +
+    `<div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+      <div class="off-info" style="flex:1">
+        <table><tr>
+          <td class="lbl">Student Name</td><td class="val" style="font-size:13pt">${studentName}</td>
+        </tr><tr>
+          <td class="lbl">Roll No.</td><td class="val" style="font-size:13pt;color:#1B3A6B;font-weight:800">${studentRoll}</td>
+        </tr><tr>
+          <td class="lbl">Class</td><td class="val">${studentClass}</td>
+        </tr><tr>
+          <td class="lbl">Exam Hall / Room</td>
+          <td class="val" style="font-size:13pt;font-weight:800;color:#1B3A6B">${seatInfo?.roomName||'—'}</td>
+        </tr></table>
+      </div>
+      <div style="border:2px dashed #1B3A6B;border-radius:8px;padding:14px;text-align:center;min-width:120px">
+        <div style="font-size:9pt;color:#475569;margin-bottom:4px">PHOTO</div>
+        <div style="width:80px;height:80px;border:1px solid #CBD5E1;margin:0 auto;background:#F8FAFD"></div>
+        <div style="font-size:8pt;color:#94A3B8;margin-top:4px">Paste here</div>
+      </div>
+    </div>
+    <div class="off-sec">📅 Exam Schedule</div>
+    <table class="off-table" style="margin-bottom:14px;font-size:9.5pt">
+      <thead><tr><th>Date</th><th>Session</th><th>Subject</th><th>Time</th><th>Marks</th></tr></thead>
+      <tbody>${schedRows}</tbody>
+    </table>
+    <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:9.5pt;color:#92400e;margin-bottom:14px">
+      ⚠️ এই pass পরীক্ষার দিন সাথে আনতে হবে। Without this pass, entry will not be permitted.
+    </div>` +
+    offSignature('Class Teacher','',prin,sch) +
+    offFooter(sch,'Student Gate Pass');
+
+  offPrint(html,'portrait','Gate Pass — '+studentName);
+}
+
+// Gate pass from Students page
+async function printGatePassFromStudents() {
+  const examSel = document.getElementById('gp-exam-sel')?.value;
+  if(!examSel){ showAlert('Select exam.','error'); return; }
+  const students = window._allStudents||await DB.get('students');
+  const cls    = document.getElementById('stuClassFilter')?.value||'';
+  const sec    = document.getElementById('stuSecFilter')?.value||'';
+  let filtered = students;
+  if(cls) filtered=filtered.filter(s=>(s.class||s.classId||'')===cls);
+  if(sec) filtered=filtered.filter(s=>(s.section||'').toUpperCase()===sec);
+  if(!filtered.length){showAlert('No students found.','warning');return;}
+
+  const [exams,tts,seatingPlans,settings]=await Promise.all([
+    DB.get('exams'),DB.get('examTimetables'),DB.get('seatingPlans'),DB.getObj('settings')
+  ]);
+  const exam = exams.find(e=>String(e.id)===String(examSel));
+  const sp   = seatingPlans.find(p=>String(p.examId)===String(examSel));
+  const sch  = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+  const prin = settings.principalName||'Dasarath Bagdi';
+
+  const pages = filtered.map(s=>{
+    const rollNum = parseInt(s.roll)||s.roll;
+    let seatInfo=null;
+    if(sp?.plan){sp.plan.forEach(room=>{
+      const rolls=String(room.rolls||'').split(',').flatMap(p=>{
+        const m=p.trim().match(/(\d+)[–\-](\d+)/);
+        if(m) return Array.from({length:parseInt(m[2])-parseInt(m[1])+1},(_,i)=>parseInt(m[1])+i);
+        return parseInt(p.trim())||[];
+      });
+      if(rolls.includes(rollNum)) seatInfo=room;
+    });}
+    const clsTT=tts.filter(t=>String(t.examId)===String(examSel)&&(t.className===s.class||t.className===s.classId)).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+    const schedRows=clsTT.map((t,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
+      <td style="padding:5px 8px;border:1px solid #dde">${t.date||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde">${t.session||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde;font-weight:600">${t.subject||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde;text-align:center">${t.time||'—'}</td>
+      <td style="padding:5px 8px;border:1px solid #dde;text-align:center">${t.maxMarks||'—'}</td>
+    </tr>`).join('');
+    return offHeader(sch,exam?.name||'','STUDENT GATE PASS / ENTRY PERMIT','','','') +
+      `<div style="display:flex;gap:16px;margin-bottom:12px">
+        <div class="off-info" style="flex:1"><table>
+          <tr><td class="lbl">Student</td><td class="val" style="font-size:13pt">${s.name}</td></tr>
+          <tr><td class="lbl">Roll No.</td><td class="val" style="font-size:14pt;font-weight:800;color:#1B3A6B">${s.roll}</td></tr>
+          <tr><td class="lbl">Class</td><td class="val">${s.class||s.classId||'—'} / Sec ${s.section||'—'}</td></tr>
+          <tr><td class="lbl">Room</td><td class="val" style="font-size:13pt;font-weight:800;color:#1B3A6B">${seatInfo?.roomName||'—'}</td></tr>
+        </table></div>
+        <div style="border:2px dashed #1B3A6B;border-radius:8px;padding:10px;text-align:center;min-width:100px">
+          <div style="font-size:8pt;color:#475569">PHOTO</div>
+          <div style="width:70px;height:70px;border:1px solid #CBD5E1;margin:4px auto;background:#F8FAFD"></div>
+        </div>
+      </div>
+      <table class="off-table" style="font-size:9pt;margin-bottom:10px">
+        <thead><tr><th>Date</th><th>Session</th><th>Subject</th><th>Time</th><th>Marks</th></tr></thead>
+        <tbody>${schedRows}</tbody>
+      </table>
+      <div style="background:#fef3c7;border-radius:5px;padding:6px 10px;font-size:8.5pt;color:#92400e">
+        ⚠️ এই pass পরীক্ষার দিন সাথে আনতে হবে।
+      </div>` +
+      offSignature('Class Teacher','',prin,sch) +
+      offFooter(sch,'Gate Pass');
+  });
+  offPrint(pages,'portrait','Gate Passes');
+  showAlert(`✅ ${pages.length} gate passes printing...`,'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ATTENDANCE SUMMARY REPORT
+// ══════════════════════════════════════════════════════════════════════════════
+async function printAttendanceSummary(examId) {
+  const [exams, tts, settings] = await Promise.all([
+    DB.get('exams'), DB.get('examTimetables'), DB.getObj('settings')
+  ]);
+  const exam = exams.find(e=>String(e.id)===String(examId));
+  const sch  = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+  const prin = settings.principalName||'Dasarath Bagdi';
+  const examTT = tts.filter(t=>String(t.examId)===String(examId));
+  const dates  = [...new Set(examTT.map(t=>t.date))].sort();
+
+  // Collect attendance from localStorage
+  const summary = [];
+  for(let i=0; i<localStorage.length; i++){
+    const key = localStorage.key(i);
+    if(!key?.startsWith(`att_${examId}_`)) continue;
+    const parts = key.split('_');
+    if(parts.length<5) continue;
+    const date=parts[2], sess=parts[3]+'_'+parts[4], room=parts.slice(5).join('_');
+    const data=JSON.parse(localStorage.getItem(key)||'{}');
+    const counts=Object.values(data).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+    summary.push({date,sess:parts[3]+' '+parts[4],room,
+      present:counts.present||0,absent:counts.absent||0,late:counts.late||0,
+      total:Object.keys(data).length});
+  }
+
+  if(!summary.length){showAlert('No attendance data found in Live Room Diary.','warning');return;}
+  summary.sort((a,b)=>a.date.localeCompare(b.date)||a.room.localeCompare(b.room));
+
+  const rows = summary.map((r,i)=>{
+    const pct=r.total>0?Math.round(r.present/r.total*100):0;
+    return `<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
+      <td style="padding:6px 10px;border:1px solid #B0C4DE;font-weight:600;color:#1B3A6B">${r.date}</td>
+      <td style="padding:6px 10px;border:1px solid #B0C4DE">${r.sess}</td>
+      <td style="padding:6px 10px;border:1px solid #B0C4DE;font-weight:700">${r.room}</td>
+      <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center">${r.total}</td>
+      <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center;color:#065f46;font-weight:700">${r.present}</td>
+      <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center;color:#991b1b;font-weight:700">${r.absent}</td>
+      <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center;color:#92400e">${r.late}</td>
+      <td style="padding:6px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:700;color:${pct>=90?'#065f46':pct>=75?'#92400e':'#991b1b'}">${pct}%</td>
+    </tr>`;
+  }).join('');
+
+  const totals=summary.reduce((a,r)=>({t:a.t+r.total,p:a.p+r.present,ab:a.ab+r.absent,l:a.l+r.late}),{t:0,p:0,ab:0,l:0});
+  const totalPct=totals.t>0?Math.round(totals.p/totals.t*100):0;
+
+  const html = offHeader(sch,exam?.name||'','ATTENDANCE SUMMARY REPORT',`Total records: ${summary.length}  |  Overall: ${totalPct}%`,'','') +
+    `<table class="off-table">
+      <thead><tr>
+        <th>Date</th><th>Session</th><th>Room</th>
+        <th style="text-align:center">Assigned</th>
+        <th style="text-align:center">Present</th>
+        <th style="text-align:center">Absent</th>
+        <th style="text-align:center">Late</th>
+        <th style="text-align:center">%</th>
+      </tr></thead>
+      <tbody>${rows}
+      <tr class="total-row">
+        <td colspan="3" style="padding:7px 10px;border:1px solid #B0C4DE;font-weight:700;background:#DCE9F8;color:#1B3A6B">TOTAL</td>
+        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:800">${totals.t}</td>
+        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:800;color:#065f46">${totals.p}</td>
+        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:800;color:#991b1b">${totals.ab}</td>
+        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:800;color:#92400e">${totals.l}</td>
+        <td style="padding:7px 10px;border:1px solid #B0C4DE;text-align:center;font-weight:800;color:${totalPct>=90?'#065f46':'#991b1b'}">${totalPct}%</td>
+      </tr></tbody>
+    </table>` +
+    offSignature('Exam Controller','',prin,sch) +
+    offFooter(sch,'Attendance Summary');
+
+  offPrint(html,'landscape','Attendance Summary');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADMIT CARD WHATSAPP REMINDER
+// ══════════════════════════════════════════════════════════════════════════════
+async function admitCardWhatsAppReminder(examId) {
+  const [exams, tts, settings] = await Promise.all([
+    DB.get('exams'), DB.get('examTimetables'), DB.getObj('settings')
+  ]);
+  const exam  = exams.find(e=>String(e.id)===String(examId));
+  const sch   = settings.schoolName||'Ramnagar High School';
+  const examTT= tts.filter(t=>String(t.examId)===String(examId)).sort((a,b)=>a.date?.localeCompare(b.date));
+  const next3 = examTT.slice(0,3);
+
+  const msg = `🏫 *${sch}*
+📢 *Exam Reminder — ${exam?.name||'Upcoming Exam'}*
+
+পরীক্ষার্থীদের দৃষ্টি আকর্ষণ করা যাচ্ছে যে —
+
+📋 আগামীকাল থেকে পরীক্ষা শুরু হচ্ছে। অনুগ্রহ করে নিচের বিষয়গুলি মেনে চলুন:
+
+✅ *Admit Card অবশ্যই সাথে আনতে হবে*
+✅ পরীক্ষা শুরুর ৩০ মিনিট আগে উপস্থিত থাকুন
+✅ নির্ধারিত Room-এ বসুন
+✅ Pen, Pencil, Scale আনুন
+❌ Mobile phone আনবেন না
+
+📅 *Upcoming Schedule:*
+${next3.map(t=>`• ${t.date} (${t.session||''}) — ${t.subject} — Class ${t.className} — ${t.time||''} — ${t.maxMarks||''} marks`).join('\n')}
+
+— শুভকামনায়, ${sch}`;
+
+  const encoded = encodeURIComponent(msg);
+  window.open('https://wa.me/?text='+encoded,'_blank');
+  showAlert('✅ WhatsApp opened with admit card reminder!','success');
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
