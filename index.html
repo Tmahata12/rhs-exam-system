@@ -5917,6 +5917,36 @@ async function renderAttendanceSheet(el) {
     <div class="page-title">✅ Attendance Register</div>
     <div style="padding:0 24px 24px">
 
+      <!-- AT-A-GLANCE -->
+      <div class="card" style="margin-bottom:14px;border-left:4px solid #1d4ed8">
+        <div class="card-title">👁️ At-a-Glance Attendance Summary</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:12px">
+          সব room-এর attendance একটি sheet-এ — date ও session অনুযায়ী। Present/Absent/Total summary সহ।
+        </p>
+        <div class="form-row">
+          <div class="form-group"><label>Exam *</label>
+            <select id="ag-exam" onchange="agLoadDates()">
+              <option value="">--Select--</option>${eOpts}
+            </select>
+          </div>
+          <div class="form-group"><label>Date *</label>
+            <select id="ag-date"><option value="">--Exam select করুন--</option></select>
+          </div>
+          <div class="form-group"><label>Session</label>
+            <select id="ag-sess">
+              <option value="1st Half">1st Half</option>
+              <option value="2nd Half">2nd Half</option>
+              <option value="both">Both (1H + 2H)</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="printAtaGlance()">🖨️ Print At-a-Glance</button>
+          <button class="btn btn-success" onclick="showAtaGlance()">👁️ Preview on Screen</button>
+        </div>
+        <div id="ag-preview" style="margin-top:14px"></div>
+      </div>
+
       <!-- Room-wise from Seating Plan -->
       <div class="card" style="margin-bottom:14px;border-left:4px solid #059669">
         <div class="card-title">🏆 Room-wise Attendance Register (Seating Plan থেকে Auto)</div>
@@ -5995,6 +6025,207 @@ async function renderAttendanceSheet(el) {
             info.style.color = '#991b1b';
         }
     };
+}
+
+// ── AG = At-a-Glance Attendance ───────────────────────────────────────────────
+async function agLoadDates() {
+    const examId = document.getElementById('ag-exam')?.value;
+    if(!examId) return;
+    const tts = await DB.get('examTimetables');
+    const dates = [...new Set(tts.filter(t=>String(t.examId)===String(examId)&&t.date&&!t.date.includes('__')).map(t=>t.date))].sort();
+    const dateEl = document.getElementById('ag-date');
+    if(dateEl) dateEl.innerHTML = '<option value="">--Select Date--</option>' + dates.map(d=>`<option value="${d}">${d}</option>`).join('');
+}
+
+async function getAtaGlanceData(examId, date, sess) {
+    const [tts, seatingPlans, rosters] = await Promise.all([
+        DB.get('examTimetables'), DB.get('seatingPlans'), DB.get('invigilatorRosters')
+    ]);
+
+    const parseRolls = (s) => {
+        if(!s) return 0;
+        let count=0;
+        s.split(',').forEach(seg=>{
+            seg=seg.trim().replace(/[–—]/g,'-');
+            if(seg.includes('-')){const[a,b]=seg.split('-').map(x=>parseInt(x.trim()));if(!isNaN(a)&&!isNaN(b))count+=b-a+1;}
+            else if(parseInt(seg))count++;
+        });
+        return count;
+    };
+
+    const sp = seatingPlans.find(p=>String(p.examId)===String(examId));
+    const roster = rosters.find(r=>String(r.examId)===String(examId));
+
+    const sessions = sess==='both' ? ['1st Half','2nd Half'] : [sess];
+    const results = [];
+
+    sessions.forEach(session => {
+        const subj = [...new Set(tts.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===session).map(t=>t.subject))].join(', ') || '—';
+        const rooms = [...new Set((sp?.plan||[]).filter(r=>r.half===session||(session==='1st Half'&&r.half==='1H')||(session==='2nd Half'&&r.half==='2H')).map(r=>r.roomName))].sort((a,b)=>(parseInt(a.replace(/\D/g,''))||0)-(parseInt(b.replace(/\D/g,''))||0));
+
+        const roomData = rooms.map(room => {
+            const roomEntries = (sp?.plan||[]).filter(r=>r.roomName===room&&(r.half===session||(session==='1st Half'&&r.half==='1H')||(session==='2nd Half'&&r.half==='2H')));
+            const assigned = roomEntries.reduce((s,r)=>s+parseRolls(r.rolls||''),0);
+            const classes = [...new Set(roomEntries.map(r=>`${r.class}-${r.section}`))].join(', ');
+            const inv = roster?.roster?.filter(r=>r.date===date&&(r.hall===room||r.room===room)&&(r.session===session||r.half===(session.includes('2nd')?'2H':'1H'))).map(r=>r.teacherName)||[];
+
+            // Load live diary data
+            const savedKey = `att_${examId}_${date}_${session}_${room}`;
+            const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
+            const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+            const present = counts.present||0;
+            const absent  = counts.absent||0;
+            const late    = counts.late||0;
+            const marked  = present+absent+late;
+
+            return {room, classes, assigned, inv: inv.join(' & '), present, absent, late, marked};
+        });
+        results.push({session, subj, roomData});
+    });
+    return results;
+}
+
+async function showAtaGlance() {
+    const examId = document.getElementById('ag-exam')?.value;
+    const date   = document.getElementById('ag-date')?.value;
+    const sess   = document.getElementById('ag-sess')?.value;
+    if(!examId||!date){ showAlert('Exam ও Date select করুন।','error'); return; }
+
+    const data = await getAtaGlanceData(examId, date, sess);
+    const exams = await DB.get('exams');
+    const exam = exams.find(e=>String(e.id)===String(examId));
+    const previewEl = document.getElementById('ag-preview');
+    if(!previewEl) return;
+
+    let html = `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">`;
+    data.forEach(({session, subj, roomData}) => {
+        const totAssigned = roomData.reduce((s,r)=>s+r.assigned,0);
+        const totPresent  = roomData.reduce((s,r)=>s+r.present,0);
+        const totAbsent   = roomData.reduce((s,r)=>s+r.absent,0);
+        html += `
+        <div style="background:var(--primary);color:white;padding:8px 14px;font-size:13px;font-weight:700">
+          ${session} — ${date} — ${subj}
+          <span style="float:right;font-weight:400;font-size:11px">Total: ${totAssigned} assigned | ${totPresent} present | ${totAbsent} absent</span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr style="background:var(--bg-2)">
+            <th>Room</th><th>Classes</th><th>Assigned</th>
+            <th style="color:#059669">Present</th><th style="color:#dc2626">Absent</th><th style="color:#d97706">Late</th>
+            <th>Marked</th><th>Invigilator</th>
+          </tr></thead><tbody>
+          ${roomData.map(r=>`<tr>
+            <td style="font-weight:700;color:var(--primary)">${r.room}</td>
+            <td style="font-size:11px">${r.classes}</td>
+            <td style="text-align:center;font-weight:600">${r.assigned}</td>
+            <td style="text-align:center;color:#059669;font-weight:700">${r.present||'—'}</td>
+            <td style="text-align:center;color:#dc2626;font-weight:700">${r.absent||'—'}</td>
+            <td style="text-align:center;color:#d97706">${r.late||'—'}</td>
+            <td style="text-align:center;font-size:11px;color:${r.marked>0?'var(--primary)':'var(--text-2)'}">${r.marked>0?r.marked+'/'+r.assigned:'Not marked'}</td>
+            <td style="font-size:11px;color:var(--text-2)">${r.inv||'—'}</td>
+          </tr>`).join('')}
+          <tr style="background:var(--bg-2);font-weight:700">
+            <td colspan="2">TOTAL</td>
+            <td style="text-align:center">${totAssigned}</td>
+            <td style="text-align:center;color:#059669">${totPresent||'—'}</td>
+            <td style="text-align:center;color:#dc2626">${totAbsent||'—'}</td>
+            <td style="text-align:center;color:#d97706">${roomData.reduce((s,r)=>s+r.late,0)||'—'}</td>
+            <td colspan="2"></td>
+          </tr>
+          </tbody>
+        </table></div>`;
+    });
+    html += '</div>';
+    previewEl.innerHTML = html;
+}
+
+async function printAtaGlance() {
+    const examId = document.getElementById('ag-exam')?.value;
+    const date   = document.getElementById('ag-date')?.value;
+    const sess   = document.getElementById('ag-sess')?.value;
+    if(!examId||!date){ showAlert('Exam ও Date select করুন।','error'); return; }
+
+    const [data, exams, stgs] = await Promise.all([
+        getAtaGlanceData(examId, date, sess), DB.get('exams'), DB.getObj('settings')
+    ]);
+    const exam = exams.find(e=>String(e.id)===String(examId));
+    const sch  = stgs.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+    const prin = stgs.principalName||'Dasarath Bagdi';
+    const logo = (typeof getSchoolLogo==='function')?getSchoolLogo():(localStorage.getItem('rhs_school_logo')||'');
+
+    let body = `<div style="font-family:'Times New Roman',serif;padding:16px">
+      <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:10px;margin-bottom:14px;position:relative">
+        ${logo?`<img src="${logo}" style="position:absolute;left:0;top:0;max-width:70px;max-height:70px;object-fit:contain">`:''}
+        <div style="font-size:16pt;font-weight:700;color:#1B3A6B">${sch}</div>
+        <div style="font-size:10pt;color:#475569;margin-top:2px">${exam?.name||''} ${exam?.year||''} — At-a-Glance Attendance</div>
+        <div style="font-size:10pt;color:#1B3A6B;font-weight:600;margin-top:2px">Date: ${date}</div>
+      </div>`;
+
+    data.forEach(({session, subj, roomData}) => {
+        const totAssigned = roomData.reduce((s,r)=>s+r.assigned,0);
+        const totPresent  = roomData.reduce((s,r)=>s+r.present,0);
+        const totAbsent   = roomData.reduce((s,r)=>s+r.absent,0);
+        const totLate     = roomData.reduce((s,r)=>s+r.late,0);
+        body += `
+        <div style="margin-bottom:16px">
+          <div style="background:#1B3A6B;color:white;padding:7px 12px;font-size:11pt;font-weight:700;display:flex;justify-content:space-between">
+            <span>${session} — Subject: ${subj}</span>
+            <span style="font-weight:400;font-size:9pt">Assigned: ${totAssigned} | Present: ${totPresent} | Absent: ${totAbsent}</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:10pt">
+            <thead><tr style="background:#E8EDF5">
+              <th style="padding:5px 8px;border:1px solid #B0C4DE;text-align:left">Room</th>
+              <th style="padding:5px 8px;border:1px solid #B0C4DE">Class/Sec</th>
+              <th style="padding:5px 8px;border:1px solid #B0C4DE">Assigned</th>
+              <th style="padding:5px 8px;border:1px solid #B0C4DE;color:#065f46">Present</th>
+              <th style="padding:5px 8px;border:1px solid #B0C4DE;color:#991b1b">Absent</th>
+              <th style="padding:5px 8px;border:1px solid #B0C4DE;color:#92400e">Late</th>
+              <th style="padding:5px 8px;border:1px solid #B0C4DE;text-align:left">Invigilator</th>
+              <th style="padding:5px 8px;border:1px solid #B0C4DE;width:80px">Signature</th>
+            </tr></thead>
+            <tbody>
+            ${roomData.map((r,i)=>`<tr style="background:${i%2===0?'#fff':'#f8faff'}">
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;font-weight:700;color:#1B3A6B">${r.room}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;font-size:9pt">${r.classes}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;font-weight:700">${r.assigned}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;font-weight:700;color:#065f46">${r.present||'—'}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;font-weight:700;color:#991b1b">${r.absent||'—'}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;color:#92400e">${r.late||'—'}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;font-size:9pt">${r.inv||'—'}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE"></td>
+            </tr>`).join('')}
+            <tr style="background:#E8EDF5;font-weight:700">
+              <td style="padding:5px 8px;border:1px solid #B0C4DE" colspan="2">TOTAL</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center">${totAssigned}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;color:#065f46">${totPresent||'—'}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;color:#991b1b">${totAbsent||'—'}</td>
+              <td style="padding:5px 8px;border:1px solid #B0C4DE;text-align:center;color:#92400e">${totLate||'—'}</td>
+              <td colspan="2" style="padding:5px 8px;border:1px solid #B0C4DE"></td>
+            </tr>
+            </tbody>
+          </table>
+        </div>`;
+    });
+
+    body += `
+      <div style="display:flex;justify-content:space-between;margin-top:24px;font-size:10pt">
+        <div>Exam Controller Signature: ____________________</div>
+        <div>${prin}<br><span style="font-size:9pt">Head of Institution, ${sch}</span></div>
+      </div>
+    </div>`;
+
+    const w = window.open('','_blank','width=950,height=700');
+    if(!w){ showAlert('Popup blocked!','error'); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>At-a-Glance — ${date}</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}
+    @page{size:A4 landscape;margin:10mm}
+    @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.no-print{display:none}}</style>
+    </head><body>
+    <div class="no-print" style="padding:10px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;gap:10px">
+      <button onclick="window.print()" style="padding:8px 20px;background:#1B3A6B;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px">🖨️ Print</button>
+      <button onclick="window.close()" style="padding:8px 20px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px">✕ Close</button>
+    </div>
+    ${body}</body></html>`);
+    w.document.close();
 }
 
 async function printRoomAttendance(mode='single') {
@@ -6849,14 +7080,21 @@ function offHeader(school, examTitle, docTitle, docSub='', memoNo='', date='') {
   const phone  = '(03452) 252271';
   const addr   = 'P.O.- Uttar Ramnagar, P.S.: Aushgram, Dist.: Purba Bardhaman';
   const today  = date || new Date().toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
+  const logo   = (typeof getSchoolLogo === 'function') ? getSchoolLogo() : (localStorage.getItem('rhs_school_logo')||'');
 
   return `
-  <div class="off-hdr">
-    <div class="school-name">${school}</div>
-    <div class="school-info">
-      Index No.: H-1/174 &nbsp;|&nbsp; DISE Code: ${dise} &nbsp;|&nbsp;
-      H.S. Code: ${hsCode} &nbsp;|&nbsp; Ph.: ${phone}<br>
-      ${addr}
+  <div class="off-hdr" style="position:relative">
+    ${logo ? `
+    <div style="position:absolute;left:0;top:0;width:72px;height:72px;display:flex;align-items:center;justify-content:center">
+      <img src="${logo}" style="max-width:68px;max-height:68px;object-fit:contain">
+    </div>` : ''}
+    <div style="padding-left:${logo?'80px':'0'}">
+      <div class="school-name">${school}</div>
+      <div class="school-info">
+        Index No.: H-1/174 &nbsp;|&nbsp; DISE Code: ${dise} &nbsp;|&nbsp;
+        H.S. Code: ${hsCode} &nbsp;|&nbsp; Ph.: ${phone}<br>
+        ${addr}
+      </div>
     </div>
     <div class="gold-bar" style="margin:6px 0 4px"></div>
     <div class="doc-title">${docTitle}</div>
@@ -9740,6 +9978,44 @@ async function renderSettings(el) {
       </div>
     </div>
 
+    <!-- Logo Upload -->
+    <div class="card" style="margin-bottom:14px;border-left:4px solid #d97706">
+      <div class="card-title">🏫 School Logo</div>
+      <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap">
+        <div>
+          <div id="logo-preview" style="width:90px;height:90px;border:2px dashed var(--border);border-radius:10px;
+               display:flex;align-items:center;justify-content:center;background:var(--bg);overflow:hidden;cursor:pointer"
+               onclick="document.getElementById('logo-file').click()">
+            ${s.schoolLogo
+              ? `<img src="${s.schoolLogo}" style="max-width:86px;max-height:86px;object-fit:contain">`
+              : `<div style="text-align:center;font-size:11px;color:var(--text-2)">🏫<br>Click to<br>upload</div>`}
+          </div>
+          <input type="file" id="logo-file" accept="image/*" style="display:none" onchange="stUploadLogo(event)">
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('logo-file').click()">📤 Upload</button>
+            ${s.schoolLogo ? `<button class="btn btn-danger btn-sm" onclick="stRemoveLogo()">🗑️ Remove</button>` : ''}
+          </div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px">Logo ব্যবহার হবে:</div>
+          <div style="font-size:12px;color:var(--text-2);line-height:1.8">
+            ✅ সব printed document-এর header-এ<br>
+            ✅ Seating plan print-এ<br>
+            ✅ Admit card-এ<br>
+            ✅ Duty card-এ<br>
+            ✅ Attendance register-এ<br>
+            ⚠️ JPG/PNG/SVG সর্বোচ্চ 2MB
+          </div>
+          <div style="margin-top:10px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="logo-watermark" ${s.logoWatermark?'checked':''}>
+              Print-এ background watermark হিসেবেও দেখাও (হালকা)
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card" style="margin-bottom:14px;border-left:4px solid #7c3aed">
       <div class="card-title">🖨️ Print Defaults</div>
       <div class="form-row">
@@ -9802,6 +10078,8 @@ async function renderSettings(el) {
       printOrient:  document.getElementById('st-orient').value,
       memoPrefix:   document.getElementById('st-memo').value.trim(),
       memoCounter:  parseInt(document.getElementById('st-memocnt').value)||1,
+      schoolLogo:   localStorage.getItem('rhs_school_logo')||'',
+      logoWatermark: document.getElementById('logo-watermark')?.checked||false,
       updatedAt:    new Date().toISOString(),
     };
     await DB.setObj('settings', settings);
@@ -9830,6 +10108,31 @@ async function renderSettings(el) {
       </div>
       <div style="text-align:center;font-size:11pt;font-weight:700;color:#2C4F8C;font-family:Arial,sans-serif">DOCUMENT TITLE</div>`;
   };
+
+  window.stUploadLogo = (event) => {
+    const file = event.target.files[0];
+    if(!file) return;
+    if(file.size > 2*1024*1024){ showAlert('File too large! Max 2MB.','error'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      localStorage.setItem('rhs_school_logo', dataUrl);
+      const preview = document.getElementById('logo-preview');
+      if(preview) preview.innerHTML = `<img src="${dataUrl}" style="max-width:86px;max-height:86px;object-fit:contain">`;
+      showAlert('✅ Logo uploaded! Save Settings করুন।','success');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.stRemoveLogo = () => {
+    localStorage.removeItem('rhs_school_logo');
+    const preview = document.getElementById('logo-preview');
+    if(preview) preview.innerHTML = `<div style="text-align:center;font-size:11px;color:var(--text-2)">🏫<br>Click to<br>upload</div>`;
+    showAlert('Logo removed.','warning');
+  };
+
+  // Get logo for print use
+  window.getSchoolLogo = () => localStorage.getItem('rhs_school_logo') || '';
 
   window.stTestPrint = async () => {
     const settings2 = {
