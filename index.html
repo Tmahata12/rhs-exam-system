@@ -715,11 +715,39 @@ function showPage(page) {
           <div style="height:200px;background:var(--border);border-radius:10px;animation:shimmer 1.2s ease-in-out infinite"></div>
         </div>
         <style>@keyframes shimmer{0%,100%{opacity:.6}50%{opacity:1}}</style>`;
-        pages[page](content);
+
+        // Render the page then auto-select exam if one is remembered
+        Promise.resolve(pages[page](content)).then(() => {
+            const examId = window._selectedExam;
+            if(!examId) return;
+            // Try to set any exam dropdown on this page
+            const selectors = [
+                'select[id*="exam"]','select[id*="Exam"]',
+                '#acExam','#ttFilter','#ttExam','#as-exam',
+                '#ld-exam','#ec-exam','#es-exam','#ufm-exam',
+                '#le-exam','#dc-exam','#qp-print-exam',
+            ];
+            selectors.forEach(sel => {
+                const el2 = document.querySelector(sel);
+                if(el2 && [...el2.options].some(o=>o.value===examId)) {
+                    el2.value = examId;
+                    el2.dispatchEvent(new Event('change'));
+                }
+            });
+        }).catch(()=>{});
     }
 }
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
+
+function whatsappShare(type, data='') {
+    let msg = '';
+    if(type==='toppers') msg = 'Top performers list';
+    else if(type==='failed') msg = 'Failed students list';
+    else msg = 'Result data';
+    window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank');
+}
+
 function calcGrade(marks, max) {
     const p = (marks/max)*100;
     if(p>=90) return 'A+'; if(p>=80) return 'A'; if(p>=70) return 'B+';
@@ -929,9 +957,12 @@ async function renderDashboard(el) {
             ['🖨️','Exam Docs','examdocs'],
             ['👨‍🎓','Students','students'],
             ['👩‍🏫','Teachers','teachers'],
-            ['📝','Marks Entry','marks'],
+            ['📦','Answer Script','answerscript'],
             ['⚡','Auto-Assign','autoassign'],
             ['🎫','Admit Cards','admitcards'],
+            ['📝','Question Paper','qpaper'],
+            ['🗓️','Next Exam','nextexam'],
+            ['⚙️','Settings','settings'],
           ].map(([icon,label,page])=>`
           <div onclick="showPage('${page}')" style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:all .15s;font-size:12px;font-weight:500;color:var(--text)"
             onmouseover="this.style.borderColor='#2563eb';this.style.color='#2563eb'"
@@ -1021,21 +1052,33 @@ async function renderExams(el) {
 }
 
 function renderExamRows(exams) {
-    if (!exams.length) return emptyRow(6,'No exams yet.');
+    if (!exams.length) return emptyRow(6,'No exams yet. Create one above.');
     return exams.slice().reverse().map(e=>`
       <tr>
-        <td><strong>${e.name}</strong><br><small style="color:#888">${e.year||''}</small></td>
-        <td>${e.type||'—'}</td>
+        <td><strong>${e.name}</strong><br><small style="color:var(--text-2)">${e.type||''} · ${e.year||''}</small></td>
         <td>${e.year||'—'}</td>
-        <td><small>${fmt(e.startDate)} → ${fmt(e.endDate)}</small></td>
-        <td>${statusBadge(e.status)}</td>
+        <td><small>${fmt(e.startDate)||'—'} → ${fmt(e.endDate)||'—'}</small></td>
+        <td>
+          <select onchange="updateExamStatus('${e.id}',this.value)"
+            style="padding:3px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text);font-family:inherit;cursor:pointer">
+            ${['Upcoming','Ongoing','Completed'].map(s=>`<option ${e.status===s?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </td>
         <td>
           <div class="btn-group">
-            <button class="btn btn-info btn-sm" onclick="showPage('timetable');window._selectedExam='${e.id}'">📅 Timetable</button>
+            <button class="btn btn-info btn-sm" onclick="showPage('timetable');window._selectedExam='${e.id}'">📅 TT</button>
+            <button class="btn btn-secondary btn-sm" onclick="showPage('seating');window._selectedExam='${e.id}'">🪑 Seat</button>
             <button class="btn btn-danger btn-sm" onclick="deleteExam('${e.id}')">🗑️</button>
           </div>
         </td>
       </tr>`).join('');
+}
+
+async function updateExamStatus(id, status) {
+    const exams = await DB.get('exams');
+    const idx = exams.findIndex(e=>String(e.id)===String(id));
+    if(idx>=0){ exams[idx].status = status; await DB.set('exams', exams); }
+    showAlert(`✅ Status → ${status}`,'success');
 }
 
 async function createExam() {
@@ -2724,20 +2767,34 @@ async function renderStudents(el) {
     </div>
     <div class="card">
       <div class="card-title">👨‍🎓 Students (${students.length} total)</div>
-      <div class="form-group" style="margin-bottom:12px;">
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <input id="stuSearch" placeholder="🔍 Search by name or roll..." oninput="filterStudentsTable()"
-          style="width:100%;padding:9px;border:2px solid var(--border);border-radius:8px;">
+          style="flex:1;min-width:160px;padding:8px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+        <select id="stuClassFilter" onchange="filterStudentsTable()"
+          style="padding:8px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+          <option value="">All Classes</option>
+          ${[...new Set(students.map(s=>s.class||s.classId||''))].filter(Boolean).sort((a,b)=>{
+            const o=['V','VI','VII','VIII','IX','X'];
+            return (o.indexOf(a)-o.indexOf(b)) || a.localeCompare(b);
+          }).map(c=>`<option value="${c}">Class ${c}</option>`).join('')}
+        </select>
+        <select id="stuSecFilter" onchange="filterStudentsTable()"
+          style="padding:8px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+          <option value="">All Sections</option>
+          ${[...new Set(students.map(s=>s.section||''))].filter(Boolean).sort().map(s=>`<option value="${s}">Section ${s}</option>`).join('')}
+        </select>
+        <span id="stu-count" style="font-size:12px;color:var(--text-2);align-self:center">${students.length} students</span>
       </div>
       <div class="table-wrap" style="max-height:450px;overflow-y:auto;">
-        <table><thead><tr><th>Roll</th><th>Name</th><th>Class</th><th>Sec</th><th>Action</th></tr></thead>
+        <table><thead><tr><th>Roll</th><th>Name</th><th>Class</th><th>Section</th><th>Action</th></tr></thead>
         <tbody id="stuTbody">${students.length ? students.map(s=>`
-          <tr>
-            <td>${s.roll}</td>
+          <tr data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
+            <td style="font-weight:600;color:var(--primary)">${s.roll}</td>
             <td>${s.name}</td>
-            <td>${s.class||s.classId||'—'}</td>
+            <td style="text-align:center"><span class="badge badge-blue">${s.class||s.classId||'—'}</span></td>
             <td style="text-align:center">${s.section||'—'}</td>
             <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${s.roll}')">🗑️</button></td>
-          </tr>`).join('') : emptyRow(5,'No students yet.')}</tbody>
+          </tr>`).join('') : emptyRow(5,'No students yet. Upload Excel to import.')}</tbody>
         </table>
       </div>
     </div></div>`;
@@ -2745,9 +2802,21 @@ async function renderStudents(el) {
 }
 
 function filterStudentsTable() {
-    const q = document.getElementById('stuSearch').value.toLowerCase();
-    const rows = document.querySelectorAll('#stuTbody tr');
-    rows.forEach(r=>{ r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+    const q   = (document.getElementById('stuSearch')?.value||'').toLowerCase();
+    const cls = document.getElementById('stuClassFilter')?.value||'';
+    const sec = document.getElementById('stuSecFilter')?.value||'';
+    const rows = document.querySelectorAll('#stuTbody tr[data-roll]');
+    let visible = 0;
+    rows.forEach(r=>{
+        const matchQ   = !q   || r.dataset.name?.includes(q) || r.dataset.roll?.includes(q);
+        const matchCls = !cls || r.dataset.class === cls;
+        const matchSec = !sec || r.dataset.sec === sec;
+        const show = matchQ && matchCls && matchSec;
+        r.style.display = show ? '' : 'none';
+        if(show) visible++;
+    });
+    const cnt = document.getElementById('stu-count');
+    if(cnt) cnt.textContent = `${visible} students`;
 }
 
 async function addStudentItem() {
@@ -4084,6 +4153,38 @@ async function createSupplementaryExam() {
     await DB.set('exams', exams);
     showAlert('✅ Supplementary Exam created!','success');
     renderReExam(document.getElementById('mainContent'));
+}
+
+async function printAllReExamNotices(failedList) {
+    const stgs = await DB.getObj('settings');
+    const school = stgs.schoolName||'Ramnagar High School (H.S.)';
+    const prin   = stgs.principalName||'Dasarath Bagdi';
+    const pages  = failedList.map(f=>{
+        const subList = f.failedSubs.map(s=>`<li style="padding:4px 0">${s.subject} (${s.marks}/${s.maxMarks||100})</li>`).join('');
+        return `<div style="page-break-after:always;padding:20px;font-family:'Noto Sans',Arial,sans-serif">
+          <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:10px;margin-bottom:16px">
+            <div style="font-size:16pt;font-weight:700;color:#1B3A6B">${school}</div>
+            <div style="font-size:11pt;font-weight:600;color:#2C4F8C;margin-top:4px">Supplementary / Re-Examination Notice</div>
+          </div>
+          <p><strong>To:</strong> The Parent/Guardian of <strong>${f.name}</strong></p>
+          <p style="margin:4px 0">Roll: <strong>${f.roll}</strong> &nbsp;·&nbsp; Class: <strong>${f.class}</strong></p>
+          <div style="background:#fff8f8;border:1px solid #fca5a5;border-radius:8px;padding:14px;margin:16px 0">
+            <p style="color:#991b1b;font-weight:600;margin-bottom:8px">আপনার সন্তান নিম্নলিখিত বিষয়ে অকৃতকার্য হয়েছে:</p>
+            <ul style="margin:0 0 0 16px;line-height:2;color:#7f1d1d">${subList}</ul>
+          </div>
+          <p>The student is required to appear for the <strong>Supplementary Examination</strong>. Date and schedule will be communicated separately.</p>
+          <div style="display:flex;justify-content:space-between;margin-top:40px">
+            <div style="text-align:center">
+              <div style="border-top:1px solid #333;width:160px;padding-top:5px;font-size:11px;margin-top:40px">Class Teacher</div>
+            </div>
+            <div style="text-align:center">
+              <div style="border-top:1px solid #333;width:160px;padding-top:5px;font-size:11px;margin-top:40px">${prin}<br>Head of Institution</div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    offPrint(pages, 'portrait', 'Re-Exam Notices');
+    showAlert(`✅ ${failedList.length} notices printing...`,'success');
 }
 
 // ── QUESTION PAPER MANAGEMENT ─────────────────────────────────────────────────
@@ -6314,7 +6415,7 @@ async function _buildPNMsg(type) {
         dates.forEach(date=>{
             const dayTTs = tt.filter(t=>t.date===date);
             msg += `📌 *${fmt(date)}*\n`;
-            dayTTs.forEach(t=>{ msg += `  • ${t.session||''} | ${t.className} | *${t.subject}* (${t.maxMarks||100} marks)\n`; });
+            dayTTs.forEach(t=>{ const m={'V':20,'VI':30,'VII':30,'VIII':30,'IX':40,'X':40}[t.className]||t.maxMarks||30; msg += `  • ${t.session||''} | ${t.className} | *${t.subject}* (${t.maxMarks||m} marks)\n`; });
             msg += '\n';
         });
         if (extra) msg += `\n📢 ${extra}\n`;
@@ -7709,6 +7810,41 @@ async function renderLiveDiary(el) {
       });
     }
 
+    // Update live counters
+    const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+    ['present','absent','late'].forEach(s=>{
+      const el2 = document.getElementById(`ld-cnt-${s}`);
+      if(el2) el2.textContent = counts[s]||0;
+    });
+    // Update progress bar
+    const total = Object.keys(saved).length;
+    const present = counts.present||0;
+    const pct = total>0 ? Math.round(present/total*100) : 0;
+    const bar = document.querySelector('.ld-progress-bar');
+    if(bar) bar.style.width = pct+'%';
+    const pctEl = document.querySelector('.ld-pct');
+    if(pctEl) pctEl.textContent = pct+'%';
+  };
+
+    // Update status badge
+    const badge = document.getElementById(`ldst_${key}`);
+    if(badge) {
+      badge.textContent = status.charAt(0).toUpperCase()+status.slice(1);
+      badge.style.background = status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5';
+      badge.style.color = status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46';
+    }
+
+    // Update buttons in this row
+    const btns = row?.querySelectorAll('button');
+    if(btns) {
+      btns.forEach(btn => {
+        const s = btn.textContent.trim().toLowerCase().includes('present')?'present':btn.textContent.toLowerCase().includes('absent')?'absent':'late';
+        btn.style.background = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--bg)';
+        btn.style.color = s===status?'white':'var(--text)';
+        btn.style.borderColor = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--border)';
+      });
+    }
+
     // Update counters
     const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
     ['present','absent','late'].forEach(s=>{
@@ -7798,7 +7934,6 @@ async function renderLiveDiary(el) {
     XLSX.writeFile(wb,`Attendance_${room}_${date}_${sess}.xlsx`);
     showAlert('✅ Exported!','success');
   };
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // NEXT EXAM SETUP — 2nd Summative template + copy from previous
@@ -7810,62 +7945,58 @@ async function renderNextExam(el) {
   const school = settings.schoolName||'Ramnagar High School (H.S.)';
 
   // Preset 2nd Summative dates
-  const NEXT_TT = [
-    // Class V — 2nd Summative (1 hr, 30 marks)
-    {cls:'V',   subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
-    {cls:'V',   subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
-    {cls:'V',   subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
-    {cls:'V',   subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:00',marks:30},
-    // Class VI-VIII
-    {cls:'VI',  subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VI',  subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VI',  subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VI',  subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VI',  subj:'History',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VI',  subj:'Geography',          date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VII', subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VII', subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VII', subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VII', subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VII', subj:'History',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VII', subj:'Geography',          date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VII', subj:'Sanskrit',           date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VIII',subj:'Bengali',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VIII',subj:'English',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VIII',subj:'Mathematics',        date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VIII',subj:'Poribesh o Porichoy',date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VIII',subj:'History',            date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VIII',subj:'Geography',          date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    {cls:'VIII',subj:'Sanskrit',           date:'__-__-2026',day:'',sess:'1st Half',time:'11:00–12:15',marks:50},
-    // Class IX-X
-    {cls:'IX',  subj:'Bengali',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'IX',  subj:'English',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'IX',  subj:'Mathematics',        date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'IX',  subj:'Physical Science',   date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'IX',  subj:'Life Science',       date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'IX',  subj:'History',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'IX',  subj:'Geography',          date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'X',   subj:'Bengali',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'X',   subj:'English',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'X',   subj:'Mathematics',        date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'X',   subj:'Physical Science',   date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'X',   subj:'Life Science',       date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'X',   subj:'History',            date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-    {cls:'X',   subj:'Geography',          date:'__-__-2026',day:'',sess:'2nd Half',time:'1:00–3:00',marks:90},
-  ];
+  // Template data factory — same subjects, different marks/time per exam type
+  const makeTemplate = (type) => {
+    const cfg = {
+      '2nd': {V:{marks:20,time:'11:00–12:00'}, 'VI-VIII':{marks:30,time:'11:00–12:15'}, 'IX-X':{marks:40,time:'1:00–2:30'}},
+      '3rd': {V:{marks:20,time:'11:00–12:00'}, 'VI-VIII':{marks:30,time:'11:00–12:15'}, 'IX-X':{marks:40,time:'1:00–2:30'}},
+      'Annual':{V:{marks:20,time:'11:00–12:00'},'VI-VIII':{marks:30,time:'11:00–12:15'},'IX-X':{marks:40,time:'1:00–2:30'}},
+    }[type] || {};
+    const g = (cls) => cls==='V'?cfg['V']:(['VI','VII','VIII'].includes(cls)?cfg['VI-VIII']:cfg['IX-X']);
+    const sess = (cls) => ['IX','X'].includes(cls)?'2nd Half':'1st Half';
+    const entries = [
+      {cls:'V',   subj:'Bengali'},            {cls:'V',   subj:'English'},
+      {cls:'V',   subj:'Mathematics'},        {cls:'V',   subj:'Poribesh o Porichoy'},
+      {cls:'VI',  subj:'Bengali'},            {cls:'VI',  subj:'English'},
+      {cls:'VI',  subj:'Mathematics'},        {cls:'VI',  subj:'Poribesh o Porichoy'},
+      {cls:'VI',  subj:'History'},            {cls:'VI',  subj:'Geography'},
+      {cls:'VII', subj:'Bengali'},            {cls:'VII', subj:'English'},
+      {cls:'VII', subj:'Mathematics'},        {cls:'VII', subj:'Poribesh o Porichoy'},
+      {cls:'VII', subj:'History'},            {cls:'VII', subj:'Geography'},
+      {cls:'VII', subj:'Sanskrit'},
+      {cls:'VIII',subj:'Bengali'},            {cls:'VIII',subj:'English'},
+      {cls:'VIII',subj:'Mathematics'},        {cls:'VIII',subj:'Poribesh o Porichoy'},
+      {cls:'VIII',subj:'History'},            {cls:'VIII',subj:'Geography'},
+      {cls:'VIII',subj:'Sanskrit'},
+      {cls:'IX',  subj:'Bengali'},            {cls:'IX',  subj:'English'},
+      {cls:'IX',  subj:'Mathematics'},        {cls:'IX',  subj:'Physical Science'},
+      {cls:'IX',  subj:'Life Science'},       {cls:'IX',  subj:'History'},
+      {cls:'IX',  subj:'Geography'},
+      {cls:'X',   subj:'Bengali'},            {cls:'X',   subj:'English'},
+      {cls:'X',   subj:'Mathematics'},        {cls:'X',   subj:'Physical Science'},
+      {cls:'X',   subj:'Life Science'},       {cls:'X',   subj:'History'},
+      {cls:'X',   subj:'Geography'},
+    ];
+    return entries.map(e=>({
+      cls:e.cls, subj:e.subj,
+      date:'__-__-2026', day:'', sess:sess(e.cls),
+      time:g(e.cls)?.time||'', marks:g(e.cls)?.marks||20
+    }));
+  };
+
+  let NEXT_TT = makeTemplate('2nd');
+  let _neTemplateType = '2nd';
 
   const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
 
   el.innerHTML = `
-  <div class="page-title">🗓️ Next Exam Setup
-    <span style="font-size:12px;font-weight:400;color:var(--text-2);margin-left:8px">2nd Summative বা যেকোনো নতুন exam তৈরি করুন</span>
-  </div>
+  <div class="page-title">🗓️ Next Exam Setup</div>
   <div style="padding:0 24px 24px">
 
     <div class="tab-bar">
       <button class="tab-pill active" onclick="neTab('create',this)">➕ Create New Exam</button>
       <button class="tab-pill" onclick="neTab('copy',this)">📋 Copy from Previous</button>
-      <button class="tab-pill" onclick="neTab('template',this)">⚡ 2nd Summative Template</button>
+      <button class="tab-pill" onclick="neTab('template',this)">⚡ Timetable Template</button>
     </div>
 
     <!-- CREATE NEW -->
@@ -7933,13 +8064,31 @@ async function renderNextExam(el) {
       </div>
     </div>
 
-    <!-- 2ND SUMMATIVE TEMPLATE -->
+    <!-- TIMETABLE TEMPLATE -->
     <div id="ne-template" class="tab-panel">
       <div class="card">
-        <div class="card-title">⚡ 2nd Summative Evaluation — Template</div>
+        <div class="card-title">⚡ Timetable Template — Class V to X</div>
         <p style="font-size:12px;color:var(--text-2);margin-bottom:14px">
-          ${NEXT_TT.length} entries preset। শুধু exam select করুন এবং dates দিন — তারপর EMS-এ save করুন।
+          Exam type select করুন → dates দিন → EMS-এ save করুন। Marks স্বয়ংক্রিয়ভাবে set হবে।
         </p>
+        <!-- Exam Type Selector -->
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          ${[
+            ['2nd','⚡ 2nd Summative','#eff6ff','#1d4ed8'],
+            ['3rd','🎯 3rd Summative','#f0fdf4','#059669'],
+            ['Annual','🏆 Annual Exam','#fdf4ff','#7c3aed'],
+          ].map(([type,label,bg,color])=>`
+            <button onclick="neSelectType('${type}')" id="ne-type-${type}"
+              style="padding:8px 16px;border-radius:8px;border:2px solid ${color};
+              background:${type==='2nd'?color:'transparent'};
+              color:${type==='2nd'?'#fff':color};
+              font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;font-family:inherit">
+              ${label}
+            </button>`).join('')}
+        </div>
+        <div id="ne-type-info" style="background:#eff6ff;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1e40af">
+          <strong>2nd Summative:</strong> Class V=20, VI-VIII=30, IX-X=40 marks
+        </div>
         <div class="form-row">
           <div class="form-group"><label>Exam *</label>
             <select id="ne-tmpl-exam"><option value="">--Select or create above--</option>${examOpts}</select>
@@ -7971,7 +8120,7 @@ async function renderNextExam(el) {
                 </tr>
               </thead>
               <tbody id="ne-tmpl-body">
-                ${NEXT_TT.map((t,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
+                ${(window.neBuildRows = (tt) => tt.map((t,i)=>`<tr style="background:${i%2===0?'#F4F8FF':'#fff'}">
                   <td style="padding:6px 10px;border:1px solid #dde;font-weight:600;color:#1B3A6B">Class ${t.cls}</td>
                   <td style="padding:6px 10px;border:1px solid #dde">${t.subj}</td>
                   <td style="padding:6px 10px;border:1px solid #dde">
@@ -7982,8 +8131,8 @@ async function renderNextExam(el) {
                     <span style="font-size:11px;padding:2px 7px;border-radius:99px;background:${t.sess.includes('2nd')?'#fef3c7':'#dbeafe'};font-weight:600">${t.sess}</span>
                   </td>
                   <td style="padding:6px 10px;border:1px solid #dde;font-size:11px;color:#475569">${t.time}</td>
-                  <td style="padding:6px 10px;border:1px solid #dde;text-align:center;font-weight:600">${t.marks}</td>
-                </tr>`).join('')}
+                  <td style="padding:6px 10px;border:1px solid #dde;text-align:center;font-weight:700;color:var(--primary)">${t.marks}</td>
+                </tr>`).join(''))(NEXT_TT)}
               </tbody>
             </table>
           </div>
@@ -8003,6 +8152,37 @@ async function renderNextExam(el) {
     document.querySelectorAll('.tab-pill').forEach(b=>b.classList.remove('active'));
     document.getElementById('ne-'+tab).classList.add('active');
     if(btn) btn.classList.add('active');
+  };
+
+  window.neSelectType = (type) => {
+    _neTemplateType = type;
+    NEXT_TT = makeTemplate(type);
+    // Update buttons
+    const colors = {'2nd':'#1d4ed8','3rd':'#059669','Annual':'#7c3aed'};
+    const bgs = {'2nd':'#eff6ff','3rd':'#f0fdf4','Annual':'#fdf4ff'};
+    ['2nd','3rd','Annual'].forEach(t=>{
+      const btn = document.getElementById('ne-type-'+t);
+      if(!btn) return;
+      btn.style.background = t===type ? colors[type] : 'transparent';
+      btn.style.color = t===type ? '#fff' : colors[t];
+    });
+    // Update info
+    const infoEl = document.getElementById('ne-type-info');
+    const labels = {
+      '2nd': '<strong>2nd Summative:</strong> Class V=20, VI-VIII=30, IX-X=40 marks',
+      '3rd': '<strong>3rd Summative:</strong> Class V=20, VI-VIII=30, IX-X=40 marks',
+      'Annual': '<strong>Annual Exam:</strong> Class V=20, VI-VIII=30, IX-X=40 marks',
+    };
+    if(infoEl) infoEl.innerHTML = labels[type]||'';
+    const color = {'2nd':'#1e40af','3rd':'#065f46','Annual':'#5b21b6'}[type];
+    const bg = {'2nd':'#eff6ff','3rd':'#f0fdf4','Annual':'#fdf4ff'}[type];
+    if(infoEl){ infoEl.style.background=bg; infoEl.style.color=color; }
+    // Rebuild table
+    const tbody = document.getElementById('ne-tmpl-body');
+    if(tbody) tbody.innerHTML = neBuildRows(NEXT_TT);
+    // Re-fill dates if start date exists
+    const start = document.getElementById('ne-tmpl-start')?.value;
+    if(start) neFillDates();
   };
 
   // Auto-fill dates from start date
@@ -9849,95 +10029,95 @@ async function tchExport() {
 
 // ── TIMETABLE SEED — 1st Summative Evaluation 2026 (from PDF) ────────────────
 const RHS_TIMETABLE_2026 = [
-  // ── Class V — 11:00–11:40 ──
-  {cls:'V',   subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–11:40'},
-  {cls:'V',   subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–11:40'},
-  {cls:'V',   subj:'Poribesh o Porichoy',date:'04-04-2026',day:'Saturday', sess:'1st Half',time:'11:00–11:40'},
-  {cls:'V',   subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–11:40'},
-  // ── Class VI — 11:00–12:15 ──
-  {cls:'VI',  subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VI',  subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VI',  subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VI',  subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VI',  subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VI',  subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
-  // ── Class VII — 11:00–12:15 ──
-  {cls:'VII', subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VII', subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VII', subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VII', subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VII', subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VII', subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VII', subj:'Sanskrit',           date:'10-04-2026',day:'Friday',   sess:'1st Half',time:'11:00–12:15'},
-  // ── Class VIII — 11:00–12:15 ──
-  {cls:'VIII',subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VIII',subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VIII',subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VIII',subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VIII',subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VIII',subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15'},
-  {cls:'VIII',subj:'Sanskrit',           date:'10-04-2026',day:'Friday',   sess:'1st Half',time:'11:00–12:15'},
-  // ── Class IX — 1:00–2:30 ──
-  {cls:'IX',  subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'IX',  subj:'English',            date:'02-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'IX',  subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'IX',  subj:'Physical Science',   date:'07-04-2026',day:'Tuesday',  sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'IX',  subj:'Life Science',       date:'08-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'IX',  subj:'History',            date:'09-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'IX',  subj:'Geography',          date:'10-04-2026',day:'Friday',   sess:'2nd Half',time:'1:00–2:30'},
-  // ── Class X — 1:00–2:30 ──
-  {cls:'X',   subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'X',   subj:'English',            date:'02-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'X',   subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'X',   subj:'Physical Science',   date:'07-04-2026',day:'Tuesday',  sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'X',   subj:'Life Science',       date:'08-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'X',   subj:'History',            date:'09-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30'},
-  {cls:'X',   subj:'Geography',          date:'10-04-2026',day:'Friday',   sess:'2nd Half',time:'1:00–2:30'},
+  // ── Class V — 30 marks — 11:00–11:40 ──
+  {cls:'V',   subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–11:40',marks:20},
+  {cls:'V',   subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–11:40',marks:20},
+  {cls:'V',   subj:'Poribesh o Porichoy',date:'04-04-2026',day:'Saturday', sess:'1st Half',time:'11:00–11:40',marks:20},
+  {cls:'V',   subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–11:40',marks:20},
+  // ── Class VI — 50 marks — 11:00–12:15 ──
+  {cls:'VI',  subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VI',  subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VI',  subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VI',  subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VI',  subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VI',  subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15',marks:30},
+  // ── Class VII — 50 marks — 11:00–12:15 ──
+  {cls:'VII', subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VII', subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VII', subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VII', subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VII', subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VII', subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VII', subj:'Sanskrit',           date:'10-04-2026',day:'Friday',   sess:'1st Half',time:'11:00–12:15',marks:30},
+  // ── Class VIII — 50 marks — 11:00–12:15 ──
+  {cls:'VIII',subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VIII',subj:'English',            date:'02-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VIII',subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VIII',subj:'Poribesh o Porichoy',date:'07-04-2026',day:'Tuesday',  sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VIII',subj:'History',            date:'08-04-2026',day:'Wednesday',sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VIII',subj:'Geography',          date:'09-04-2026',day:'Thursday', sess:'1st Half',time:'11:00–12:15',marks:30},
+  {cls:'VIII',subj:'Sanskrit',           date:'10-04-2026',day:'Friday',   sess:'1st Half',time:'11:00–12:15',marks:30},
+  // ── Class IX — 90 marks — 1:00–2:30 ──
+  {cls:'IX',  subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'IX',  subj:'English',            date:'02-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'IX',  subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'IX',  subj:'Physical Science',   date:'07-04-2026',day:'Tuesday',  sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'IX',  subj:'Life Science',       date:'08-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'IX',  subj:'History',            date:'09-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'IX',  subj:'Geography',          date:'10-04-2026',day:'Friday',   sess:'2nd Half',time:'1:00–2:30',marks:40},
+  // ── Class X — 90 marks — 1:00–2:30 ──
+  {cls:'X',   subj:'Bengali',            date:'01-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'X',   subj:'English',            date:'02-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'X',   subj:'Mathematics',        date:'06-04-2026',day:'Monday',   sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'X',   subj:'Physical Science',   date:'07-04-2026',day:'Tuesday',  sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'X',   subj:'Life Science',       date:'08-04-2026',day:'Wednesday',sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'X',   subj:'History',            date:'09-04-2026',day:'Thursday', sess:'2nd Half',time:'1:00–2:30',marks:40},
+  {cls:'X',   subj:'Geography',          date:'10-04-2026',day:'Friday',   sess:'2nd Half',time:'1:00–2:30',marks:40},
 ];
 
 // ── Question Paper seed data (from RHS_Master_Complete.xlsx) ──────────────────
 const RHS_QP_LIST_2026 = [
-  {className:'IX', subject:'Geography',            examDate:'10-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Dasarath Bagdi',   set:'A',status:'Ready',copies:0},
-  {className:'VII',subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Subodh K. Saha',    set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Subodh K. Saha',    set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'English',             examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Madan Besra',       set:'A',status:'Ready',copies:0},
-  {className:'IX', subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Madan Besra',       set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'Physical Science',     examDate:'07-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Sagar K. Roy',     set:'A',status:'Ready',copies:0},
-  {className:'VII',subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sagar K. Roy',     set:'A',status:'Ready',copies:0},
-  {className:'V',  subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Sangita Bhakat',    set:'A',status:'Ready',copies:0},
-  {className:'VII',subject:'History',              examDate:'08-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sangita Bhakat',    set:'A',status:'Ready',copies:0},
-  {className:'IX', subject:'Life Science',         examDate:'08-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Tapan K. Mondal',  set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'Life Science',         examDate:'08-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Tapan K. Mondal',  set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'History',              examDate:'09-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Dulal Biswas',      set:'A',status:'Ready',copies:0},
-  {className:'V',  subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Pampa Das',        set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Samir Thandar',     set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'English',             examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Samir Thandar',     set:'A',status:'Ready',copies:0},
-  {className:'VII',subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Shyamal K. Garai', set:'A',status:'Ready',copies:0},
-  {className:'IX', subject:'Mathematics',          examDate:'06-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Shyamal K. Garai', set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Pronay K. Biswas', set:'A',status:'Ready',copies:0},
-  {className:'IX', subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Pronay K. Biswas', set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'Geography',           examDate:'09-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Apurba L. Mandal', set:'A',status:'Ready',copies:0},
-  {className:'IX', subject:'History',              examDate:'09-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Apurba L. Mandal', set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'Mathematics',         examDate:'06-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sobhraj S. Roy',   set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'Mathematics',          examDate:'06-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Sobhraj S. Roy',   set:'A',status:'Ready',copies:0},
-  {className:'VI', subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Dhriti S. Karmakar',set:'A',status:'Ready',copies:0},
-  {className:'X',  subject:'Geography',            examDate:'10-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Santosh Biswas',   set:'A',status:'Ready',copies:0},
-  {className:'VI', subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Tamanna Choudhury',set:'A',status:'Ready',copies:0},
-  {className:'VII',subject:'Geography',            examDate:'09-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Tamanna Choudhury',set:'A',status:'Ready',copies:0},
-  {className:'VI', subject:'History',              examDate:'08-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Chandana Pal',     set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'History',             examDate:'08-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Chandana Pal',     set:'A',status:'Ready',copies:0},
-  {className:'VI', subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Banani Bhadra',    set:'A',status:'Ready',copies:0},
-  {className:'VII',subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Banani Bhadra',    set:'A',status:'Ready',copies:0},
-  {className:'V',  subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Suchitra Mondal',  set:'A',status:'Ready',copies:0},
-  {className:'VI', subject:'Geography',            examDate:'09-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Suchitra Mondal',  set:'A',status:'Ready',copies:0},
-  {className:'VI', subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Jayanta Pathak',   set:'A',status:'Ready',copies:0},
-  {className:'IX', subject:'Physical Science',     examDate:'07-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Jayanta Pathak',   set:'A',status:'Ready',copies:0},
-  {className:'IX', subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:90,preparedBy:'Sukanya Ghosh',    set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'Bengali',             examDate:'01-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Sukanya Ghosh',    set:'A',status:'Ready',copies:0},
-  {className:'V',  subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Pradip Kar',       set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'Poribesh o Porichoy', examDate:'07-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Pradip Kar',       set:'A',status:'Ready',copies:0},
-  {className:'VII',subject:'Sanskrit',             examDate:'10-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Lakshman Ghosh',   set:'A',status:'Ready',copies:0},
-  {className:'VIII',subject:'Sanskrit',            examDate:'10-04-2026',session:'1st Half',fullMarks:50,preparedBy:'Lakshman Ghosh',   set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Geography',            examDate:'10-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Dasarath Bagdi',   set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Subodh K. Saha',    set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Subodh K. Saha',    set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'English',             examDate:'02-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Madan Besra',       set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Madan Besra',       set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Physical Science',     examDate:'07-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Sagar K. Roy',     set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Sagar K. Roy',     set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:20,preparedBy:'Sangita Bhakat',    set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'History',              examDate:'08-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Sangita Bhakat',    set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Life Science',         examDate:'08-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Tapan K. Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Life Science',         examDate:'08-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Tapan K. Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'History',              examDate:'09-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Dulal Biswas',      set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:20,preparedBy:'Pampa Das',        set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'English',              examDate:'02-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Samir Thandar',     set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'English',             examDate:'02-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Samir Thandar',     set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Shyamal K. Garai', set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Mathematics',          examDate:'06-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Shyamal K. Garai', set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Pronay K. Biswas', set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Pronay K. Biswas', set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Geography',           examDate:'09-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Apurba L. Mandal', set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'History',              examDate:'09-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Apurba L. Mandal', set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Mathematics',         examDate:'06-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Sobhraj S. Roy',   set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Mathematics',          examDate:'06-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Sobhraj S. Roy',   set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Poribesh o Porichoy',  examDate:'07-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Dhriti S. Karmakar',set:'A',status:'Ready',copies:0},
+  {className:'X',  subject:'Geography',            examDate:'10-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Santosh Biswas',   set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'English',              examDate:'02-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Tamanna Choudhury',set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Geography',            examDate:'09-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Tamanna Choudhury',set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'History',              examDate:'08-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Chandana Pal',     set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'History',             examDate:'08-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Chandana Pal',     set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Banani Bhadra',    set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Banani Bhadra',    set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'Bengali',              examDate:'01-04-2026',session:'1st Half',fullMarks:20,preparedBy:'Suchitra Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Geography',            examDate:'09-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Suchitra Mondal',  set:'A',status:'Ready',copies:0},
+  {className:'VI', subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Jayanta Pathak',   set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Physical Science',     examDate:'07-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Jayanta Pathak',   set:'A',status:'Ready',copies:0},
+  {className:'IX', subject:'Bengali',              examDate:'01-04-2026',session:'2nd Half',fullMarks:40,preparedBy:'Sukanya Ghosh',    set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Bengali',             examDate:'01-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Sukanya Ghosh',    set:'A',status:'Ready',copies:0},
+  {className:'V',  subject:'Mathematics',          examDate:'06-04-2026',session:'1st Half',fullMarks:20,preparedBy:'Pradip Kar',       set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Poribesh o Porichoy', examDate:'07-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Pradip Kar',       set:'A',status:'Ready',copies:0},
+  {className:'VII',subject:'Sanskrit',             examDate:'10-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Lakshman Ghosh',   set:'A',status:'Ready',copies:0},
+  {className:'VIII',subject:'Sanskrit',            examDate:'10-04-2026',session:'1st Half',fullMarks:30,preparedBy:'Lakshman Ghosh',   set:'A',status:'Ready',copies:0},
 ];
 
 async function edSeedTimetable() {
@@ -9967,6 +10147,7 @@ async function edSeedTimetable() {
       className: r.cls,
       session:   r.sess,
       time:      r.time,
+      maxMarks:  r.marks || ({'V':20,'VI':30,'VII':30,'VIII':30,'IX':40,'X':40}[r.cls] || 30),
     }));
 
     // Remove old entries for this exam, add new
@@ -10401,6 +10582,7 @@ async function edImportToEMS() {
           date: r[0], day: r[1], subject: r[2]||'',
           className: r[3]||'', time: r[4]||'',
           session: half,
+          maxMarks: r[5] ? parseInt(r[5]) : ({'V':20,'VI':30,'VII':30,'VIII':30,'IX':40,'X':40}[String(r[3]||'').trim()] || 30),
         });
       }
     });
