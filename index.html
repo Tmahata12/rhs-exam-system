@@ -4587,6 +4587,7 @@ async function printAllReExamNotices(failedList) {
 
 // ── QUESTION PAPER MANAGEMENT ─────────────────────────────────────────────────
 async function renderQPaper(el) {
+  DB.invalidate('questionPapers'); DB.invalidate('exams');
   const [exams, qpapers, teachers, tts, settings] = await Promise.all([
     DB.get('exams'), DB.get('questionPapers').catch(()=>[]),
     DB.get('teachers'), DB.get('examTimetables'), DB.getObj('settings')
@@ -7119,6 +7120,7 @@ async function pnPrint(type) {
 // ANSWER SCRIPT — Distribution + Return Tracking
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderAnswerScript(el) {
+  DB.invalidate('answerScripts'); DB.invalidate('exams');
   const [exams, teachers, settings, tts] = await Promise.all([
     DB.get('exams'), DB.get('teachers'), DB.getObj('settings'), DB.get('examTimetables')
   ]);
@@ -7339,11 +7341,9 @@ async function renderAnswerScript(el) {
               data-cls="${s.class}" data-subj="${s.subject}" data-field="total">
           </td>
           <td style="padding:7px 10px">
-            <select data-cls="${s.class}" data-subj="${s.subject}" data-field="teacher"
-              style="width:180px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);font-family:inherit;font-size:12px">
-              <option value="">--Select--</option>
-              ${teachers.map(t=>`<option ${s.teacher===t.name?'selected':''}>${t.name}</option>`).join('')}
-              <option value="_manual_" ${s.teacher&&!teachers.find(t=>t.name===s.teacher)?'selected':''}>✏️ Type manually</option>
+            <div style="font-size:13px;font-weight:500;color:var(--text)">${s.teacher||'—'}</div>
+            <select data-cls="${s.class}" data-subj="${s.subject}" data-field="teacher" style="display:none">
+              <option value="${s.teacher||''}" selected>${s.teacher||''}</option>
             </select>
           </td>
           <td style="padding:7px 10px"></td>
