@@ -96,11 +96,12 @@ body { font-family:'Inter',system-ui,-apple-system,sans-serif; background:var(--
 ::-webkit-scrollbar-thumb:hover { background:#94a3b8; }
 
 .app-header {
-  background:linear-gradient(135deg,#1e3a8a 0%,#1d4ed8 55%,#4338ca 100%);
+  background:linear-gradient(90deg,#0f172a 0%,#1e3a8a 35%,#1d4ed8 65%,#4338ca 100%);
   color:#fff; padding:0 14px; height:var(--header-h);
   display:flex; align-items:center;
-  box-shadow:0 2px 16px rgba(29,78,216,0.3);
+  box-shadow:0 2px 20px rgba(15,23,42,0.4);
   position:sticky; top:0; z-index:100; gap:10px;
+  border-bottom:1px solid rgba(255,255,255,0.07);
 }
 .app-header h1 {
   font-size:14px; font-weight:700; display:flex; align-items:center;
@@ -115,29 +116,27 @@ body { font-family:'Inter',system-ui,-apple-system,sans-serif; background:var(--
 }
 
 /* Header Searchbar */
-.header-search {
-  position:relative; flex:1; max-width:300px; min-width:120px;
-}
+.header-search { position:relative; flex:1; max-width:300px; min-width:120px; }
 .header-search input {
   width:100%; padding:7px 14px 7px 34px;
-  background:rgba(255,255,255,0.14);
-  border:1px solid rgba(255,255,255,0.22);
+  background:rgba(255,255,255,0.1);
+  border:1px solid rgba(255,255,255,0.18);
   border-radius:22px; color:#fff; font-size:12px;
   font-family:inherit; outline:none; transition:all .2s;
 }
-.header-search input::placeholder { color:rgba(255,255,255,0.55); }
+.header-search input::placeholder { color:rgba(255,255,255,0.4); }
 .header-search input:focus {
-  background:rgba(255,255,255,0.22);
-  border-color:rgba(255,255,255,0.5);
-  box-shadow:0 0 0 3px rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.18);
+  border-color:rgba(255,255,255,0.4);
+  box-shadow:0 0 0 3px rgba(255,255,255,0.06);
 }
 .header-search .srch-icon {
   position:absolute; left:11px; top:50%; transform:translateY(-50%);
-  font-size:13px; opacity:0.65; pointer-events:none;
+  font-size:13px; opacity:0.5; pointer-events:none;
 }
 .search-dropdown {
-  position:absolute; top:calc(100% + 7px); left:0; right:0;
-  background:white; border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,0.18);
+  position:absolute; top:calc(100% + 8px); left:0; right:0;
+  background:white; border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,0.2);
   border:1px solid #e2e8f0; max-height:320px; overflow-y:auto; z-index:9999;
 }
 .search-item {
@@ -154,33 +153,16 @@ body { font-family:'Inter',system-ui,-apple-system,sans-serif; background:var(--
 /* Footer */
 .app-footer {
   background:linear-gradient(90deg,#0f172a 0%,#1e3a8a 40%,#1d4ed8 70%,#4338ca 100%);
-  color:rgba(255,255,255,0.6);
-  font-size:11px; flex-shrink:0;
-  padding:0 20px;
-  height:32px;
+  color:rgba(255,255,255,0.6); font-size:11px; flex-shrink:0;
+  padding:0 20px; height:32px;
   display:flex; align-items:center; justify-content:space-between; gap:8px;
   border-top:1px solid rgba(255,255,255,0.08);
 }
-.app-footer .ft-school {
-  display:flex; align-items:center; gap:6px;
-  font-weight:600; color:rgba(255,255,255,0.5);
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-.app-footer .ft-credit {
-  display:flex; align-items:center; gap:4px;
-  white-space:nowrap; color:rgba(255,255,255,0.55);
-}
-.app-footer .ft-credit strong {
-  color:#93c5fd; font-weight:800; letter-spacing:.5px; font-size:12px;
-}
-.app-footer .ft-time {
-  font-size:10.5px; color:rgba(255,255,255,0.4);
-  font-variant-numeric:tabular-nums; white-space:nowrap; letter-spacing:.3px;
-}
-@media(max-width:600px){
-  .app-footer .ft-school { display:none; }
-  .app-footer { padding:0 12px; }
-}
+.app-footer .ft-school { display:flex; align-items:center; gap:6px; font-weight:600; color:rgba(255,255,255,0.5); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.app-footer .ft-credit { display:flex; align-items:center; gap:4px; white-space:nowrap; color:rgba(255,255,255,0.55); }
+.app-footer .ft-credit strong { color:#93c5fd; font-weight:800; letter-spacing:.5px; font-size:12px; }
+.app-footer .ft-time { font-size:10.5px; color:rgba(255,255,255,0.4); font-variant-numeric:tabular-nums; white-space:nowrap; letter-spacing:.3px; }
+@media(max-width:600px){ .app-footer .ft-school { display:none; } .app-footer { padding:0 12px; } }
 
 /* Dashboard stat cards — glossy rectangle */
 .db-stat-card {
@@ -241,23 +223,83 @@ body { font-family:'Inter',system-ui,-apple-system,sans-serif; background:var(--
 }
 [data-theme="dark"] .sidebar.collapsed .sidebar-item:hover::after { background:#334155; }
 
-.login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(150deg,#0f172a 0%,#1e3a8a 45%,#312e81 100%); position:relative; overflow:hidden; }
-.login-wrap::before { content:''; position:absolute; width:560px; height:560px; background:radial-gradient(circle,rgba(99,102,241,.18) 0%,transparent 70%); top:-80px; right:-80px; border-radius:50%; }
-.login-wrap::after  { content:''; position:absolute; width:380px; height:380px; background:radial-gradient(circle,rgba(29,78,216,.14) 0%,transparent 70%); bottom:-60px; left:-60px; border-radius:50%; }
-.login-box { background:rgba(255,255,255,.07); backdrop-filter:blur(24px); border:1px solid rgba(255,255,255,.14); border-radius:20px; padding:40px 36px; width:90%; max-width:390px; text-align:center; position:relative; z-index:1; box-shadow:0 28px 60px rgba(0,0,0,.45); }
-.login-box .logo { font-size:48px; margin-bottom:12px; animation:float 3s ease-in-out infinite; }
-@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
-.login-box h1 { color:#fff; font-size:22px; font-weight:800; margin-bottom:3px; letter-spacing:-.4px; }
-.login-box .subtitle { color:rgba(255,255,255,.55); font-size:12px; margin-bottom:26px; }
-.login-box .field { background:rgba(255,255,255,.07); border:1.5px solid rgba(255,255,255,.14); border-radius:9px; margin-bottom:10px; display:flex; align-items:center; transition:border-color .2s; }
-.login-box .field:focus-within { border-color:rgba(99,102,241,.7); background:rgba(255,255,255,.1); }
-.login-box .field-icon { padding:0 12px; font-size:15px; opacity:.55; }
-.login-box .field input, .login-box .field select { flex:1; background:transparent; border:none; color:#fff; font-size:14px; padding:12px 12px 12px 0; outline:none; font-family:inherit; }
+.login-wrap {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 45%,#312e81 100%);
+  position:relative; overflow:hidden;
+}
+.login-wrap::before {
+  content:''; position:absolute; width:800px; height:800px;
+  background:radial-gradient(circle,rgba(99,102,241,.14) 0%,transparent 65%);
+  top:-300px; right:-300px; pointer-events:none;
+}
+.login-wrap::after {
+  content:''; position:absolute; width:600px; height:600px;
+  background:radial-gradient(circle,rgba(29,78,216,.1) 0%,transparent 65%);
+  bottom:-200px; left:-200px; pointer-events:none;
+}
+.login-box {
+  background:rgba(255,255,255,.06); backdrop-filter:blur(28px);
+  border:1px solid rgba(255,255,255,.12); border-radius:24px;
+  padding:44px 40px; width:90%; max-width:400px;
+  text-align:center; position:relative; z-index:1;
+  box-shadow:0 32px 64px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.1);
+}
+.login-box .logo {
+  font-size:52px; margin-bottom:14px; display:inline-block;
+  animation:float 3.5s ease-in-out infinite;
+  filter:drop-shadow(0 4px 16px rgba(147,197,253,.35));
+}
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+.login-box h1 { color:#fff; font-size:23px; font-weight:800; margin-bottom:3px; letter-spacing:-.5px; }
+.login-box .subtitle { color:rgba(255,255,255,.4); font-size:11.5px; margin-bottom:28px; line-height:1.6; }
+.login-box .field {
+  background:rgba(255,255,255,.07); border:1.5px solid rgba(255,255,255,.11);
+  border-radius:12px; margin-bottom:10px; display:flex; align-items:center;
+  transition:all .2s; overflow:hidden;
+}
+.login-box .field:focus-within {
+  border-color:rgba(147,197,253,.45); background:rgba(255,255,255,.1);
+  box-shadow:0 0 0 3px rgba(99,102,241,.15);
+}
+.login-box .field-icon { padding:0 13px; font-size:16px; opacity:.45; flex-shrink:0; }
+.login-box .field input, .login-box .field select {
+  flex:1; background:transparent; border:none; color:#fff;
+  font-size:14px; padding:13px 12px 13px 0; outline:none; font-family:inherit;
+}
 .login-box .field select option { background:#1e3a8a; }
-.login-box .field input::placeholder { color:rgba(255,255,255,.35); }
-.login-btn { width:100%; padding:13px; margin-top:4px; background:linear-gradient(135deg,#1d4ed8,#4338ca); color:#fff; border:none; border-radius:9px; font-size:14px; font-weight:700; cursor:pointer; letter-spacing:.2px; transition:all .2s; box-shadow:0 4px 18px rgba(29,78,216,.4); }
-.login-btn:hover { transform:translateY(-2px); box-shadow:0 7px 24px rgba(29,78,216,.52); }
-.login-btn:active { transform:translateY(0); }
+.login-box .field input::placeholder { color:rgba(255,255,255,.28); }
+.login-box .field .show-pass {
+  background:none; border:none; color:rgba(255,255,255,.35);
+  cursor:pointer; padding:0 14px; font-size:17px;
+  transition:color .15s; flex-shrink:0; line-height:1;
+}
+.login-box .field .show-pass:hover { color:rgba(255,255,255,.75); }
+.login-btn {
+  width:100%; padding:14px; margin-top:8px;
+  background:linear-gradient(135deg,#6366f1 0%,#4f46e5 50%,#3b82f6 100%);
+  color:#fff; border:none; border-radius:12px;
+  font-size:15px; font-weight:700; cursor:pointer;
+  letter-spacing:.4px; transition:all .22s;
+  box-shadow:0 4px 20px rgba(99,102,241,.5);
+  position:relative; overflow:hidden;
+}
+.login-btn::after {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.12),transparent 60%);
+  border-radius:12px; pointer-events:none;
+}
+.login-btn:hover {
+  transform:translateY(-2px);
+  box-shadow:0 8px 28px rgba(99,102,241,.65);
+  background:linear-gradient(135deg,#818cf8,#6366f1,#60a5fa);
+}
+.login-btn:active { transform:translateY(0); filter:brightness(.93); }
+.login-err {
+  display:none; color:#fca5a5; font-size:12px; margin-top:10px;
+  background:rgba(220,38,38,.15); border-radius:9px;
+  padding:9px 14px; border:1px solid rgba(220,38,38,.2); text-align:left;
+}
 
 .app-body { display:flex; flex:1; overflow:hidden; min-height:0; }
 
@@ -488,25 +530,30 @@ tbody tr:hover td { background:#eef3ff !important; }
   <div class="login-box">
     <div class="logo">🎓</div>
     <h1>RHS Exam System</h1>
-    <p class="subtitle">Ramnagar High School (H.S.) — Exam Management</p>
+    <p class="subtitle">Ramnagar High School (H.S.)<br>Exam Management Portal</p>
+
     <div class="field">
       <span class="field-icon">👤</span>
       <select id="loginRole">
         <option value="">— Select Role —</option>
-        <option value="admin">Admin</option>
-        <option value="teacher">Teacher</option>
-        <option value="office">Office Staff</option>
+        <option value="admin">🔐 Admin</option>
+        <option value="teacher">👩‍🏫 Teacher</option>
+        <option value="office">🗂️ Office Staff</option>
       </select>
     </div>
     <div class="field">
-      <span class="field-icon">🔑</span>
-      <input type="text" id="loginUser" placeholder="Username" autocomplete="off">
+      <span class="field-icon">✉️</span>
+      <input type="text" id="loginUser" placeholder="Username" autocomplete="off"
+        onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
     </div>
     <div class="field">
       <span class="field-icon">🔒</span>
-      <input type="password" id="loginPass" placeholder="Password">
+      <input type="password" id="loginPass" placeholder="Password"
+        onkeydown="if(event.key==='Enter')doLogin()">
+      <button class="show-pass" onclick="togglePass(this)" title="Show/hide password" type="button">👁️</button>
     </div>
-    <button class="login-btn" onclick="doLogin()">Login →</button>
+    <div class="login-err" id="loginErr">⚠️ Invalid credentials. Please try again.</div>
+    <button class="login-btn" onclick="doLogin()">Sign In →</button>
   </div>
 </div>
 
@@ -790,41 +837,69 @@ const DB = {
 };
 
 // ── AUTH ─────────────────────────────────────────────────────────────────────
+// Show/hide password toggle
+function togglePass(btn) {
+    const inp = btn.parentElement.querySelector('input');
+    if(!inp) return;
+    const isPass = inp.type === 'password';
+    inp.type = isPass ? 'text' : 'password';
+    btn.textContent = isPass ? '🙈' : '👁️';
+    inp.focus();
+}
+
 async function doLogin() {
     const role = document.getElementById('loginRole').value;
     const user = document.getElementById('loginUser').value.trim();
     const pass = document.getElementById('loginPass').value;
-    if (!role||!user||!pass) { showAlert('Please fill all fields.','error'); return; }
+    const errEl = document.getElementById('loginErr');
+    const btn = document.querySelector('.login-btn');
 
-    // Try backend auth
-    try {
-        const data = await apiFetch('/api/auth/login','POST',{username:user,password:pass});
-        localStorage.setItem(JWT_KEY, data.token);
-        startApp(data.user.fullName||data.user.username, role, true);
-        return;
-    } catch(e) { /* backend auth failed — try no-auth access */ }
-
-    // Try no-auth direct access (some backends allow public read)
-    try {
-        const testData = await fetchNoAuth('/api/exams');
-        if(Array.isArray(testData)) {
-            // Backend accessible without auth — proceed
-            localStorage.setItem('EMS_NO_AUTH', '1');
-            startApp(user==='admin'?'AHM RHS':user, role, true);
-            return;
-        }
-    } catch(e2) { /* no-auth also failed */ }
-
-    // Local fallback
-    const defaults = {
-        admin:{p:'admin123',n:'AHM RHS'},
-        teacher:{p:'teacher123',n:'Sample Teacher'},
-        office:{p:'office123',n:'Office Staff'}
+    const showErr = (msg) => {
+        if(errEl){ errEl.textContent = '⚠️ '+msg; errEl.style.display='block'; }
     };
-    if (defaults[user] && defaults[user].p===pass) {
-        startApp(defaults[user].n, role, false);
-    } else {
-        showAlert('Login failed. Backend unreachable. Check internet/server.','error');
+    const hideErr = () => { if(errEl) errEl.style.display='none'; };
+
+    if (!role||!user||!pass) { showErr('Role, Username ও Password সব দিন।'); return; }
+    hideErr();
+    if(btn){ btn.textContent='⏳ Signing in...'; btn.disabled=true; }
+
+    try {
+        // Try backend auth
+        try {
+            const data = await apiFetch('/api/auth/login','POST',{username:user,password:pass});
+            localStorage.setItem(JWT_KEY, data.token);
+            if(btn){ btn.textContent='✅ Success!'; }
+            setTimeout(()=>startApp(data.user.fullName||data.user.username, role, true), 300);
+            return;
+        } catch(e) {}
+
+        // Try no-auth
+        try {
+            const testData = await fetchNoAuth('/api/exams');
+            if(Array.isArray(testData)) {
+                localStorage.setItem('EMS_NO_AUTH', '1');
+                if(btn){ btn.textContent='✅ Success!'; }
+                setTimeout(()=>startApp(user==='admin'?'AHM RHS':user, role, true), 300);
+                return;
+            }
+        } catch(e2) {}
+
+        // Local fallback
+        const defaults = {
+            admin:{p:'admin123',n:'AHM RHS'},
+            teacher:{p:'teacher123',n:'Sample Teacher'},
+            office:{p:'office123',n:'Office Staff'}
+        };
+        if (defaults[user] && defaults[user].p===pass) {
+            if(btn){ btn.textContent='✅ Success!'; }
+            setTimeout(()=>startApp(defaults[user].n, role, false), 300);
+        } else {
+            showErr('Username বা Password সঠিক নয়।');
+            if(btn){ btn.textContent='Sign In →'; btn.disabled=false; }
+        }
+    } catch(err) {
+        showErr('Login failed. Internet connection check করুন।');
+        if(btn){ btn.textContent='Sign In →'; btn.disabled=false; }
     }
 }
 
