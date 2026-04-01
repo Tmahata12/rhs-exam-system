@@ -1968,6 +1968,7 @@ async function renderSeating(el) {
     <div class="tab-bar">
       <button class="tab-pill active" onclick="spTab('generate',this)">⚙️ Generate</button>
       <button class="tab-pill" onclick="spTab('saved',this)">📁 Saved Plans (${savedPlans.length})</button>
+      <button class="tab-pill" onclick="spTab('edit',this)">✏️ Edit / Add Student</button>
       <button class="tab-pill" onclick="spTab('map',this)">🗺️ Visual Map</button>
       <button class="tab-pill" onclick="spTab('import',this)">📥 Excel Import</button>
     </div>
@@ -2068,6 +2069,96 @@ async function renderSeating(el) {
         </div>
         <div id="sp-plan-detail" style="margin-top:14px"></div>
         ` : '<p style="text-align:center;color:var(--text-2);padding:30px">No saved plans yet. Data Hub → 🪑 Seed Seating Plan করুন।</p>'}
+      </div>
+    </div>
+
+    <!-- EDIT TAB -->
+    <div id="sp-edit" class="tab-panel">
+      <div class="card">
+        <div class="card-title">✏️ Student Add / Edit — Manual</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:16px">Saved seating plan-এ নতুন student যোগ করুন বা existing student-এর room পরিবর্তন করুন।</p>
+
+        <div class="form-row" style="margin-bottom:14px">
+          <div class="form-group"><label>Seating Plan *</label>
+            <select id="sp-edit-plan" onchange="spEditLoadPlan()">
+              <option value="">--Select Plan--</option>
+              ${savedPlans.map(p=>`<option value="${p.id}">${p.examName||p.id}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <!-- Add new student -->
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:12px">➕ নতুন Student / Missing Roll যোগ করুন</div>
+          <div class="form-row">
+            <div class="form-group"><label>Roll *</label>
+              <input id="sp-add-roll" type="number" placeholder="e.g. 46" min="1">
+            </div>
+            <div class="form-group"><label>Class *</label>
+              <select id="sp-add-class">
+                ${['V','VI','VII','VIII','IX','X'].map(c=>`<option value="${c}">Class ${c}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group"><label>Section *</label>
+              <select id="sp-add-section">
+                <option value="A">A (Boys)</option>
+                <option value="B">B (Girls)</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Half *</label>
+              <select id="sp-add-half">
+                <option value="1st Half">1st Half (V–VIII)</option>
+                <option value="2nd Half">2nd Half (IX–X)</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Room *</label>
+              <select id="sp-add-room"><option value="">--Plan select করুন--</option></select>
+            </div>
+          </div>
+          <button class="btn btn-success" onclick="spAddStudentToRoom()">➕ Add to Room</button>
+        </div>
+
+        <!-- Move student -->
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:700;color:#1e40af;margin-bottom:12px">🔄 Student-এর Room পরিবর্তন করুন</div>
+          <div class="form-row">
+            <div class="form-group"><label>Class</label>
+              <select id="sp-move-class"><option value="">--</option>${['V','VI','VII','VIII','IX','X'].map(c=>`<option>${c}</option>`).join('')}</select>
+            </div>
+            <div class="form-group"><label>Section</label>
+              <select id="sp-move-sec"><option value="A">A</option><option value="B">B</option></select>
+            </div>
+            <div class="form-group"><label>Roll</label>
+              <input id="sp-move-roll" type="number" placeholder="Roll No" oninput="spFindCurrentRoom()">
+            </div>
+            <div class="form-group"><label>Current Room</label>
+              <input id="sp-move-current" readonly placeholder="—" style="background:var(--bg-2);color:var(--primary);font-weight:700">
+            </div>
+            <div class="form-group"><label>New Room *</label>
+              <select id="sp-move-room"><option value="">--Select--</option></select>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="spMoveStudent()">🔄 Move Student</button>
+        </div>
+
+        <!-- Remove student -->
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:12px">🗑️ Student Remove করুন (absent/transferred)</div>
+          <div class="form-row">
+            <div class="form-group"><label>Class</label>
+              <select id="sp-del-class">${['V','VI','VII','VIII','IX','X'].map(c=>`<option>${c}</option>`).join('')}</select>
+            </div>
+            <div class="form-group"><label>Section</label>
+              <select id="sp-del-sec"><option value="A">A</option><option value="B">B</option></select>
+            </div>
+            <div class="form-group"><label>Roll</label>
+              <input id="sp-del-roll" type="number" placeholder="Roll No">
+            </div>
+          </div>
+          <button class="btn btn-danger" onclick="spRemoveStudent()">🗑️ Remove from Seating</button>
+        </div>
+
+        <div id="sp-edit-status"></div>
       </div>
     </div>
 
@@ -2574,6 +2665,198 @@ async function whatsappPlan(id) {
     });
     msg+=`📅 Total: ${p.plan.length} students | ${rooms.length} rooms\n📍 ${school}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
+}
+
+// ── SEATING EDIT FUNCTIONS ────────────────────────────────────────────────────
+async function spEditLoadPlan() {
+    const planId = document.getElementById('sp-edit-plan').value;
+    if(!planId) return;
+    const plans = await DB.get('seatingPlans');
+    const p = plans.find(x=>x.id===planId);
+    if(!p) return;
+
+    // Get all unique rooms from plan
+    const rooms = [...new Set((p.plan||[]).map(r=>r.roomName))].sort((a,b)=>{
+        const na=parseInt(a.replace(/\D/g,''))||0, nb=parseInt(b.replace(/\D/g,''))||0;
+        return na-nb;
+    });
+    const roomOpts = rooms.map(r=>`<option value="${r}">${r}</option>`).join('');
+    ['sp-add-room','sp-move-room'].forEach(id=>{
+        const el = document.getElementById(id);
+        if(el) el.innerHTML = '<option value="">--Select Room--</option>' + roomOpts;
+    });
+
+    const statusEl = document.getElementById('sp-edit-status');
+    if(statusEl) statusEl.innerHTML = `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;font-size:12px;color:#065f46">
+        ✅ Plan loaded: <strong>${p.examName}</strong> | ${rooms.length} rooms | ${(p.plan||[]).reduce((s,r)=>{
+            let c=0; (r.rolls||'').split(',').forEach(seg=>{seg=seg.trim().replace(/[–—]/g,'-');if(seg.includes('-')){const[a,b]=seg.split('-');c+=parseInt(b)-parseInt(a)+1;}else if(parseInt(seg))c++;});return s+c;
+        },0)} students
+    </div>`;
+}
+
+async function spFindCurrentRoom() {
+    const planId = document.getElementById('sp-edit-plan').value;
+    const cls    = document.getElementById('sp-move-class').value;
+    const sec    = document.getElementById('sp-move-sec').value;
+    const roll   = parseInt(document.getElementById('sp-move-roll').value);
+    if(!planId||!cls||!roll) return;
+
+    const plans = await DB.get('seatingPlans');
+    const p = plans.find(x=>x.id===planId);
+    if(!p) return;
+
+    const parseRolls = (s) => {
+        if(!s) return [];
+        const rolls=[];
+        s.split(',').forEach(seg=>{
+            seg=seg.trim().replace(/[–—]/g,'-');
+            if(seg.includes('-')){const[a,b]=seg.split('-').map(x=>parseInt(x.trim()));if(!isNaN(a)&&!isNaN(b))for(let i=a;i<=b;i++)rolls.push(i);}
+            else{const n=parseInt(seg);if(!isNaN(n))rolls.push(n);}
+        });
+        return rolls;
+    };
+
+    const entry = (p.plan||[]).find(r=>
+        r.class===cls && r.section===sec && parseRolls(r.rolls).includes(roll)
+    );
+    const curEl = document.getElementById('sp-move-current');
+    if(curEl) curEl.value = entry ? entry.roomName : 'Not found in plan';
+}
+
+async function spAddStudentToRoom() {
+    const planId = document.getElementById('sp-edit-plan').value;
+    const roll   = parseInt(document.getElementById('sp-add-roll').value);
+    const cls    = document.getElementById('sp-add-class').value;
+    const sec    = document.getElementById('sp-add-section').value;
+    const half   = document.getElementById('sp-add-half').value;
+    const room   = document.getElementById('sp-add-room').value;
+    if(!planId||!roll||!cls||!room){showAlert('Plan, Roll, Class ও Room সব দিন।','error');return;}
+
+    const plans = await DB.get('seatingPlans');
+    const p = plans.find(x=>x.id===planId);
+    if(!p){showAlert('Plan not found.','error');return;}
+
+    const gender = sec==='A'?'BOYS':'GIRLS';
+
+    // Check if already exists
+    const parseRolls = (s)=>{if(!s)return[];const r=[];s.split(',').forEach(seg=>{seg=seg.trim().replace(/[–—]/g,'-');if(seg.includes('-')){const[a,b]=seg.split('-').map(x=>parseInt(x.trim()));if(!isNaN(a)&&!isNaN(b))for(let i=a;i<=b;i++)r.push(i);}else{const n=parseInt(seg);if(!isNaN(n))r.push(n);}});return r;};
+
+    const existing = (p.plan||[]).find(r=>r.class===cls&&r.section===sec&&parseRolls(r.rolls).includes(roll));
+    if(existing){showAlert(`Roll ${roll} ইতিমধ্যে ${existing.roomName}-এ আছে।`,'warning');return;}
+
+    // Find matching entry in plan (same room+class+section+half) or create new
+    let entry = (p.plan||[]).find(r=>r.roomName===room&&r.class===cls&&r.section===sec&&(r.half===half||r.half===(half.includes('2nd')?'2H':'1H')));
+
+    if(entry){
+        // Add roll to existing entry's rolls string
+        const existing_rolls = parseRolls(entry.rolls);
+        existing_rolls.push(roll);
+        existing_rolls.sort((a,b)=>a-b);
+        // Rebuild compact rolls string
+        const segs=[];let i=0;
+        const arr=existing_rolls;
+        while(i<arr.length){let j=i;while(j+1<arr.length&&arr[j+1]===arr[j]+1)j++;segs.push(j>i?`${arr[i]}–${arr[j]}`:String(arr[i]));i=j+1;}
+        entry.rolls = segs.join(', ');
+        entry.assigned = (entry.assigned||0)+1;
+    } else {
+        // Create new entry
+        p.plan.push({roomName:room,gender,half,class:cls,section:sec,assigned:1,capacity:0,vacant:0,rolls:String(roll)});
+    }
+
+    const updatedPlans = plans.map(x=>x.id===planId?p:x);
+    await DB.set('seatingPlans', updatedPlans);
+    DB.invalidate('seatingPlans');
+
+    // Also add to students if not exists
+    const students = await DB.get('students');
+    if(!students.find(s=>s.class===cls&&s.section===sec&&parseInt(s.roll)===roll)){
+        students.push({id:`stu_${cls}_${sec}_${roll}`,roll,name:'New Student',class:cls,section:sec});
+        await DB.set('students', students);
+    }
+
+    showAlert(`✅ Roll ${roll} (Class ${cls}-${sec}) added to ${room}!`,'success');
+    const statusEl = document.getElementById('sp-edit-status');
+    if(statusEl) statusEl.innerHTML = `<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;font-size:13px;color:#065f46;margin-top:8px">
+        ✅ Roll <strong>${roll}</strong> (Class ${cls}-${sec}) → Room <strong>${room}</strong> (${half}) যোগ করা হয়েছে।
+    </div>`;
+    document.getElementById('sp-add-roll').value = '';
+}
+
+async function spMoveStudent() {
+    const planId   = document.getElementById('sp-edit-plan').value;
+    const cls      = document.getElementById('sp-move-class').value;
+    const sec      = document.getElementById('sp-move-sec').value;
+    const roll     = parseInt(document.getElementById('sp-move-roll').value);
+    const newRoom  = document.getElementById('sp-move-room').value;
+    if(!planId||!cls||!roll||!newRoom){showAlert('সব field পূরণ করুন।','error');return;}
+
+    const plans = await DB.get('seatingPlans');
+    const p = plans.find(x=>x.id===planId);
+    if(!p){showAlert('Plan not found.','error');return;}
+
+    const parseRolls = (s)=>{if(!s)return[];const r=[];s.split(',').forEach(seg=>{seg=seg.trim().replace(/[–—]/g,'-');if(seg.includes('-')){const[a,b]=seg.split('-').map(x=>parseInt(x.trim()));if(!isNaN(a)&&!isNaN(b))for(let i=a;i<=b;i++)r.push(i);}else{const n=parseInt(seg);if(!isNaN(n))r.push(n);}});return r;};
+    const rollsToStr = (arr)=>{arr=arr.sort((a,b)=>a-b);const segs=[];let i=0;while(i<arr.length){let j=i;while(j+1<arr.length&&arr[j+1]===arr[j]+1)j++;segs.push(j>i?`${arr[i]}–${arr[j]}`:String(arr[i]));i=j+1;}return segs.join(', ');};
+
+    // Find and remove from current
+    let oldRoom = '', oldHalf='', oldGender='';
+    (p.plan||[]).forEach(entry=>{
+        if(entry.class===cls&&entry.section===sec){
+            const rolls = parseRolls(entry.rolls);
+            if(rolls.includes(roll)){
+                oldRoom=entry.roomName; oldHalf=entry.half; oldGender=entry.gender;
+                entry.rolls = rollsToStr(rolls.filter(r=>r!==roll));
+                entry.assigned = Math.max(0,(entry.assigned||1)-1);
+            }
+        }
+    });
+    if(!oldRoom){showAlert(`Roll ${roll} plan-এ পাওয়া যায়নি।`,'error');return;}
+
+    // Add to new room
+    let newEntry = (p.plan||[]).find(r=>r.roomName===newRoom&&r.class===cls&&r.section===sec);
+    if(newEntry){
+        const rolls=parseRolls(newEntry.rolls);rolls.push(roll);
+        newEntry.rolls=rollsToStr(rolls);newEntry.assigned=(newEntry.assigned||0)+1;
+    } else {
+        p.plan.push({roomName:newRoom,gender:oldGender,half:oldHalf,class:cls,section:sec,assigned:1,capacity:0,vacant:0,rolls:String(roll)});
+    }
+
+    const updatedPlans = plans.map(x=>x.id===planId?p:x);
+    await DB.set('seatingPlans', updatedPlans);
+    DB.invalidate('seatingPlans');
+    showAlert(`✅ Roll ${roll} → ${oldRoom} থেকে ${newRoom}-এ সরানো হয়েছে।`,'success');
+    document.getElementById('sp-move-roll').value='';
+    document.getElementById('sp-move-current').value='';
+    spFindCurrentRoom();
+}
+
+async function spRemoveStudent() {
+    const planId = document.getElementById('sp-edit-plan').value;
+    const cls    = document.getElementById('sp-del-class').value;
+    const sec    = document.getElementById('sp-del-sec').value;
+    const roll   = parseInt(document.getElementById('sp-del-roll').value);
+    if(!planId||!cls||!roll){showAlert('Plan, Class ও Roll দিন।','error');return;}
+    if(!confirm(`Roll ${roll} (Class ${cls}-${sec}) seating থেকে remove করবেন?`)) return;
+
+    const plans = await DB.get('seatingPlans');
+    const p = plans.find(x=>x.id===planId);
+    if(!p){showAlert('Plan not found.','error');return;}
+
+    const parseRolls = (s)=>{if(!s)return[];const r=[];s.split(',').forEach(seg=>{seg=seg.trim().replace(/[–—]/g,'-');if(seg.includes('-')){const[a,b]=seg.split('-').map(x=>parseInt(x.trim()));if(!isNaN(a)&&!isNaN(b))for(let i=a;i<=b;i++)r.push(i);}else{const n=parseInt(seg);if(!isNaN(n))r.push(n);}});return r;};
+    const rollsToStr = (arr)=>{arr=arr.sort((a,b)=>a-b);const segs=[];let i=0;while(i<arr.length){let j=i;while(j+1<arr.length&&arr[j+1]===arr[j]+1)j++;segs.push(j>i?`${arr[i]}–${arr[j]}`:String(arr[i]));i=j+1;}return segs.join(', ');};
+
+    let found=false;
+    (p.plan||[]).forEach(entry=>{
+        if(entry.class===cls&&entry.section===sec){
+            const rolls=parseRolls(entry.rolls);
+            if(rolls.includes(roll)){found=true;entry.rolls=rollsToStr(rolls.filter(r=>r!==roll));entry.assigned=Math.max(0,(entry.assigned||1)-1);}
+        }
+    });
+    if(!found){showAlert(`Roll ${roll} plan-এ পাওয়া যায়নি।`,'warning');return;}
+
+    await DB.set('seatingPlans', plans.map(x=>x.id===planId?p:x));
+    DB.invalidate('seatingPlans');
+    showAlert(`✅ Roll ${roll} (Class ${cls}-${sec}) seating থেকে remove হয়েছে।`,'success');
+    document.getElementById('sp-del-roll').value='';
 }
 
 async function deletePlan(id) {
