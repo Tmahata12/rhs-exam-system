@@ -2034,26 +2034,43 @@ async function renderSeating(el) {
         ${savedPlans.length ? `
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Exam</th><th>Date Generated</th><th>Rooms</th><th>Students</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Exam</th><th>Rooms</th><th>Half</th><th>Students</th><th>Actions</th></tr></thead>
             <tbody>
-              ${savedPlans.slice().reverse().map(p=>`
+              ${savedPlans.slice().reverse().map(p=>{
+                // Calculate total students from rolls
+                const parseRollCount = (rollsStr) => {
+                  if(!rollsStr||rollsStr==='p') return 0;
+                  let count=0;
+                  rollsStr.split(',').forEach(seg=>{
+                    seg=seg.trim().replace(/[–—]/g,'-');
+                    if(seg.includes('-')){const[a,b]=seg.split('-').map(s=>parseInt(s.trim()));if(!isNaN(a)&&!isNaN(b))count+=b-a+1;}
+                    else if(parseInt(seg)) count+=1;
+                  });
+                  return count;
+                };
+                const totalStudents = (p.plan||[]).reduce((s,r)=>s+parseRollCount(r.rolls||''),0);
+                const rooms1H = [...new Set((p.plan||[]).filter(r=>r.half==='1st Half'||r.half==='1H').map(r=>r.roomName))].length;
+                const rooms2H = [...new Set((p.plan||[]).filter(r=>r.half==='2nd Half'||r.half==='2H').map(r=>r.roomName))].length;
+                return `
               <tr>
                 <td><strong>${p.examName||'—'}</strong></td>
-                <td><small>${p.createdOn?fmt(p.createdOn.split('T')[0]):'—'}</small></td>
-                <td style="text-align:center">${p.totalHalls||'—'}</td>
-                <td style="text-align:center">${p.plan?.length||'—'}</td>
+                <td style="text-align:center">${p.totalHalls||[...new Set((p.plan||[]).map(r=>r.roomName))].length}</td>
+                <td style="font-size:11px;color:var(--text-2)">1H: ${rooms1H} rooms<br>2H: ${rooms2H} rooms</td>
+                <td style="text-align:center;font-weight:700;color:var(--primary)">${totalStudents}</td>
                 <td>
                   <div class="btn-group">
+                    <button class="btn btn-info btn-sm" onclick="spViewPlan('${p.id}')">👁️ View</button>
                     <button class="btn btn-primary btn-sm" onclick="reprinkPlan('${p.id}')">🖨️ Print</button>
                     <button class="btn btn-warning btn-sm" onclick="exportPlanXLSX('${p.id}')">📊 Excel</button>
-                    <button class="btn btn-info btn-sm" onclick="whatsappPlan('${p.id}')">📱 Share</button>
                     <button class="btn btn-danger btn-sm" onclick="deletePlan('${p.id}')">🗑️</button>
                   </div>
                 </td>
-              </tr>`).join('')}
+              </tr>`;}).join('')}
             </tbody>
           </table>
-        </div>` : '<p style="text-align:center;color:var(--text-2);padding:30px">No saved plans yet. Generate and save a plan first.</p>'}
+        </div>
+        <div id="sp-plan-detail" style="margin-top:14px"></div>
+        ` : '<p style="text-align:center;color:var(--text-2);padding:30px">No saved plans yet. Data Hub → 🪑 Seed Seating Plan করুন।</p>'}
       </div>
     </div>
 
@@ -2328,6 +2345,71 @@ async function renderSeating(el) {
 }
 
 // Saved plan actions
+async function spViewPlan(id) {
+    const plans = await DB.get('seatingPlans');
+    const p = plans.find(x=>x.id===id);
+    if(!p){ showAlert('Plan not found.','error'); return; }
+
+    const parseRollCount = (rollsStr) => {
+        if(!rollsStr||rollsStr==='p') return 0;
+        let count=0;
+        rollsStr.split(',').forEach(seg=>{
+            seg=seg.trim().replace(/[–—]/g,'-');
+            if(seg.includes('-')){const[a,b]=seg.split('-').map(s=>parseInt(s.trim()));if(!isNaN(a)&&!isNaN(b))count+=b-a+1;}
+            else if(parseInt(seg)) count+=1;
+        });
+        return count;
+    };
+
+    // Group by half, then room
+    const halves = ['1st Half','2nd Half'];
+    let html = `<div style="margin-top:16px">
+      <div style="font-size:14px;font-weight:700;color:var(--primary);margin-bottom:10px">
+        📋 ${p.examName} — Seating Plan Detail
+      </div>`;
+
+    halves.forEach(half=>{
+        const halfPlan = (p.plan||[]).filter(r=>r.half===half||r.half===(half.includes('2nd')?'2H':'1H'));
+        if(!halfPlan.length) return;
+        const rooms = [...new Set(halfPlan.map(r=>r.roomName))];
+        const halfTotal = halfPlan.reduce((s,r)=>s+parseRollCount(r.rolls||''),0);
+
+        html += `<div style="margin-bottom:16px">
+          <div style="font-size:13px;font-weight:700;background:var(--bg-2);padding:8px 12px;border-radius:6px;margin-bottom:8px;border-left:3px solid var(--primary)">
+            ${half==='1st Half'?'🌅 1st Half (Class V–VIII)':'🌆 2nd Half (Class IX–X)'} — ${halfTotal} students
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr>
+              <th>Room</th><th>Gender</th><th>Class</th><th>Sec</th>
+              <th>Students</th><th>Rolls</th>
+            </tr></thead><tbody>`;
+
+        rooms.forEach(room=>{
+            const roomEntries = halfPlan.filter(r=>r.roomName===room);
+            roomEntries.forEach((r,i)=>{
+                const cnt = parseRollCount(r.rolls||'');
+                if(!cnt && !r.rolls) return;
+                const genderColor = r.gender==='BOYS'?'#eff6ff':'#fdf4ff';
+                html += `<tr style="background:${i===0?'':''}">
+                  ${i===0?`<td rowspan="${roomEntries.length}" style="font-weight:700;color:var(--primary);background:${genderColor};text-align:center">${room}</td>`:''}
+                  <td style="font-size:11px;color:${r.gender==='BOYS'?'#1d4ed8':'#7c3aed'}">${r.gender==='BOYS'?'👨 Boys':'👩 Girls'}</td>
+                  <td style="font-weight:600">Class ${r.class}</td>
+                  <td style="text-align:center">Sec ${r.section}</td>
+                  <td style="text-align:center;font-weight:700;color:var(--primary)">${cnt||r.assigned||0}</td>
+                  <td style="font-size:11px;color:var(--text-2)">${r.rolls||'—'}</td>
+                </tr>`;
+            });
+        });
+
+        html += `</tbody></table></div></div>`;
+    });
+
+    html += `</div>`;
+    const detailEl = document.getElementById('sp-plan-detail');
+    if(detailEl) detailEl.innerHTML = html;
+    detailEl?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
 async function reprinkPlan(id) {
     const plans = await DB.get('seatingPlans');
     const p = plans.find(x=>x.id===id);
