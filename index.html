@@ -8300,7 +8300,7 @@ async function renderLiveDiary(el) {
             <td style="padding:6px 10px">
               <div style="display:flex;gap:4px;flex-wrap:wrap">
                 ${['present','absent','late'].map(s=>`
-                <button onclick="ldMark('${aKey}','${s}','${savedKey}')"
+                <button data-s="${s}" onclick="ldMark('${aKey}','${s}','${savedKey}')"
                   style="padding:4px 12px;border-radius:6px;border:1.5px solid;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;
                   background:${status===s?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--card)'};
                   color:${status===s?'white':'var(--text)'};
@@ -8418,75 +8418,37 @@ async function renderLiveDiary(el) {
 
 
     window.ldMark = (key, status, savedKey) => {
-    const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
-    saved[key] = status;
-    localStorage.setItem(savedKey, JSON.stringify(saved));
+      const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
+      saved[key] = status;
+      localStorage.setItem(savedKey, JSON.stringify(saved));
 
-    // Update row background
-    const row = document.getElementById(`ldr_${key}`);
-    if(row) row.style.background = status==='absent'?'#fff1f2':status==='late'?'#fffbeb':'';
+      // Update row background
+      const row = document.getElementById(`ldr_${key}`);
+      if(row) row.style.background = status==='absent'?'#fff1f2':status==='late'?'#fffbeb':'';
 
-    // Update status badge
-    const badge = document.getElementById(`ldst_${key}`);
-    if(badge) {
-      badge.textContent = status.charAt(0).toUpperCase()+status.slice(1);
-      badge.style.background = status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5';
-      badge.style.color = status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46';
-    }
+      // Update status badge
+      const badge = document.getElementById(`ldst_${key}`);
+      if(badge) {
+        badge.textContent = status==='present'?'Present':status==='absent'?'Absent':'Late';
+        badge.style.background = status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5';
+        badge.style.color = status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46';
+      }
 
-    // Update buttons in this row
-    const btns = row?.querySelectorAll('button');
-    if(btns) {
-      btns.forEach(btn => {
-        const s = btn.textContent.trim().toLowerCase().includes('present')?'present':btn.textContent.toLowerCase().includes('absent')?'absent':'late';
-        btn.style.background = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--bg)';
+      // Update button colors — use data-status attribute
+      row?.querySelectorAll('button[data-s]').forEach(btn => {
+        const s = btn.dataset.s;
+        btn.style.background = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--card)';
         btn.style.color = s===status?'white':'var(--text)';
         btn.style.borderColor = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--border)';
       });
-    }
 
-    // Update live counters
-    const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
-    ['present','absent','late'].forEach(s=>{
-      const el2 = document.getElementById(`ld-cnt-${s}`);
-      if(el2) el2.textContent = counts[s]||0;
-    });
-    // Update progress bar
-    const total = Object.keys(saved).length;
-    const present = counts.present||0;
-    const pct = total>0 ? Math.round(present/total*100) : 0;
-    const bar = document.querySelector('.ld-progress-bar');
-    if(bar) bar.style.width = pct+'%';
-    const pctEl = document.querySelector('.ld-pct');
-    if(pctEl) pctEl.textContent = pct+'%';
-  };
-
-    // Update status badge
-    const badge = document.getElementById(`ldst_${key}`);
-    if(badge) {
-      badge.textContent = status.charAt(0).toUpperCase()+status.slice(1);
-      badge.style.background = status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5';
-      badge.style.color = status==='absent'?'#991b1b':status==='late'?'#92400e':'#065f46';
-    }
-
-    // Update buttons in this row
-    const btns = row?.querySelectorAll('button');
-    if(btns) {
-      btns.forEach(btn => {
-        const s = btn.textContent.trim().toLowerCase().includes('present')?'present':btn.textContent.toLowerCase().includes('absent')?'absent':'late';
-        btn.style.background = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--bg)';
-        btn.style.color = s===status?'white':'var(--text)';
-        btn.style.borderColor = s===status?{present:'#059669',absent:'#dc2626',late:'#d97706'}[s]:'var(--border)';
+      // Update live counters
+      const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
+      ['present','absent','late'].forEach(s=>{
+        const el2 = document.getElementById(`ld-cnt-${s}`);
+        if(el2) el2.textContent = counts[s]||0;
       });
-    }
-
-    // Update counters
-    const counts = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
-    ['present','absent','late'].forEach(s=>{
-      const el = document.getElementById(`ld-cnt-${s}`);
-      if(el) el.textContent = counts[s]||0;
-    });
-  };
+    };
 
   window.ldMarkAll = (status, savedKey, total) => {
     const saved = JSON.parse(localStorage.getItem(savedKey)||'{}');
@@ -8501,18 +8463,36 @@ async function renderLiveDiary(el) {
 
   window.ldPrintDiary = async (examId, date, sess, room, savedKey) => {
     const saved   = JSON.parse(localStorage.getItem(savedKey)||'{}');
-    const exObj   = exams.find(e=>String(e.id)===String(examId));
-    const subjList= tts.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===sess).map(t=>t.subject);
-    const invList = rosters.find(r=>String(r.examId)===String(examId))?.roster
-                    ?.filter(r=>r.date===date&&r.hall===room).map(r=>r.teacherName)||[];
+    if(!Object.keys(saved).length){ showAlert('কোনো attendance data নেই। আগে mark করুন।','warning'); return; }
+
+    const [freshExams, freshTTs, freshRosters, freshStudents, stgs] = await Promise.all([
+      DB.get('exams'), DB.get('examTimetables'), DB.get('invigilatorRosters'),
+      DB.get('students'), DB.getObj('settings')
+    ]);
+    const sch     = stgs.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+    const prin    = stgs.principalName||'Dasarath Bagdi';
+    const exObj   = freshExams.find(e=>String(e.id)===String(examId));
+    const subjList= freshTTs.filter(t=>String(t.examId)===String(examId)&&t.date===date&&t.session===sess).map(t=>t.subject);
+    const invList = freshRosters.find(r=>String(r.examId)===String(examId))?.roster
+                    ?.filter(r=>r.date===date&&(r.hall===room||r.room===room)&&(r.session===sess||r.half===(sess.includes('2nd')?'2H':'1H'))).map(r=>r.teacherName)||[];
     const counts  = Object.values(saved).reduce((a,v)=>{a[v]=(a[v]||0)+1;return a;},{});
 
-    const rows = Object.entries(saved).map(([key,status],i)=>{
+    // Sort rows by class, section, roll
+    const sortedEntries = Object.entries(saved).sort(([a],[b])=>{
+      const [ac,as,ar]=a.split('_'); const [bc,bs,br]=b.split('_');
+      const clsOrd=['V','VI','VII','VIII','IX','X'];
+      const co=(clsOrd.indexOf(ac)-clsOrd.indexOf(bc))||as.localeCompare(bs)||(parseInt(ar)-parseInt(br));
+      return co;
+    });
+
+    const rows = sortedEntries.map(([key,status],i)=>{
       const [cls,sec,roll]=key.split('_');
+      const stu = freshStudents.find(s=>(s.class===cls||s.classId===cls)&&(s.section===sec||!sec)&&(String(s.roll)===String(roll)));
       return `<tr style="background:${status==='absent'?'#fff1f2':status==='late'?'#fffbeb':''}">
         <td style="padding:6px 8px;border:1px solid #dde;text-align:center">${i+1}</td>
-        <td style="padding:6px 8px;border:1px solid #dde;font-weight:700;color:#1B3A6B">${roll}</td>
-        <td style="padding:6px 8px;border:1px solid #dde">Class ${cls} Sec ${sec}</td>
+        <td style="padding:6px 8px;border:1px solid #dde;font-weight:700;color:#1B3A6B;text-align:center">${roll}</td>
+        <td style="padding:6px 8px;border:1px solid #dde">${stu?.name||'—'}</td>
+        <td style="padding:6px 8px;border:1px solid #dde;text-align:center">Class ${cls} / ${sec}</td>
         <td style="padding:6px 8px;border:1px solid #dde;text-align:center">
           <span style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;
             background:${status==='absent'?'#fee2e2':status==='late'?'#fef3c7':'#d1fae5'};
@@ -8520,41 +8500,64 @@ async function renderLiveDiary(el) {
             ${status.toUpperCase()}
           </span>
         </td>
-        <td style="padding:6px 8px;border:1px solid #dde;width:100px"></td>
+        <td style="padding:6px 8px;border:1px solid #dde;width:80px"></td>
       </tr>`;
     }).join('');
 
-    const html = `<div style="font-family:Arial,sans-serif;padding:20px">
+    const absent_rolls = sortedEntries.filter(([,s])=>s==='absent').map(([k])=>k.split('_')[2]).join(', ');
+
+    const html = `<div style="font-family:'Times New Roman',serif;padding:20px">
       <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:12px;margin-bottom:14px">
-        <div style="font-size:17pt;font-weight:700;color:#1B3A6B">${school}</div>
-        <div style="font-size:12pt;font-weight:600;color:#2C4F8C;margin-top:3px">Room Diary — ${exObj?.name||''} ${exObj?.year||''}</div>
-        <div style="font-size:11pt;color:#475569;margin-top:3px">
-          Room: <b>${room}</b> · Date: <b>${date}</b> · Session: <b>${sess}</b> · Subject: <b>${[...new Set(subjList)].join(', ')||'—'}</b>
+        <div style="font-size:17pt;font-weight:700;color:#1B3A6B">${sch}</div>
+        <div style="font-size:12pt;font-weight:600;color:#2C4F8C;margin-top:3px">
+          ${exObj?.name||''} ${exObj?.year||''} — Room Attendance Register
         </div>
-        ${invList.length?`<div style="font-size:10pt;color:#475569;margin-top:2px">Invigilator: ${invList.join(' · ')}</div>`:''}
+        <div style="font-size:11pt;color:#475569;margin-top:4px">
+          Room: <b>${room}</b> &nbsp;|&nbsp; Date: <b>${date}</b> &nbsp;|&nbsp; Session: <b>${sess}</b><br>
+          Subject: <b>${[...new Set(subjList)].join(', ')||'—'}</b>
+        </div>
+        ${invList.length?`<div style="font-size:10pt;color:#475569;margin-top:4px">Invigilator: <b>${invList.join(' · ')}</b></div>`:''}
       </div>
-      <div style="display:flex;gap:14px;margin-bottom:14px">
-        ${[['Present',counts.present||0,'#d1fae5','#065f46'],['Absent',counts.absent||0,'#fee2e2','#991b1b'],['Late',counts.late||0,'#fef3c7','#92400e']]
-          .map(([l,n,bg,c])=>`<div style="background:${bg};border-radius:8px;padding:8px 16px;text-align:center">
-            <div style="font-size:22pt;font-weight:800;color:${c}">${n}</div>
+      <div style="display:flex;gap:16px;margin-bottom:14px">
+        ${[['Present',counts.present||0,'#d1fae5','#065f46'],['Absent',counts.absent||0,'#fee2e2','#991b1b'],['Late',counts.late||0,'#fef3c7','#92400e'],['Total',Object.keys(saved).length,'#eff6ff','#1d4ed8']]
+          .map(([l,n,bg,c])=>`<div style="background:${bg};border:1px solid ${c};border-radius:8px;padding:8px 16px;text-align:center;min-width:60px">
+            <div style="font-size:20pt;font-weight:800;color:${c}">${n}</div>
             <div style="font-size:9pt;color:${c}">${l}</div>
           </div>`).join('')}
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:11pt">
         <thead><tr style="background:#1B3A6B;color:white">
-          <th style="padding:7px 8px">#</th><th style="padding:7px 8px">Roll</th>
-          <th style="padding:7px 8px;text-align:left">Class/Sec</th>
-          <th style="padding:7px 8px">Status</th><th style="padding:7px 8px">Signature</th>
+          <th style="padding:7px 8px;border:1px solid #1B3A6B">#</th>
+          <th style="padding:7px 8px;border:1px solid #1B3A6B">Roll</th>
+          <th style="padding:7px 8px;border:1px solid #1B3A6B;text-align:left">Name</th>
+          <th style="padding:7px 8px;border:1px solid #1B3A6B">Class/Sec</th>
+          <th style="padding:7px 8px;border:1px solid #1B3A6B">Status</th>
+          <th style="padding:7px 8px;border:1px solid #1B3A6B;width:90px">Signature</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${absent_rolls?`<div style="margin-top:14px;padding:10px;background:#fff1f2;border:1px solid #fecaca;border-radius:6px;font-size:11pt">
+        <strong>Absent Roll Nos:</strong> ${absent_rolls}
+      </div>`:''}
+      <div style="margin-top:30px;display:flex;justify-content:space-between;font-size:11pt">
+        <div>Invigilator Signature: ____________________</div>
+        <div>Head of Examination: ____________________</div>
+      </div>
     </div>`;
 
-    const w=window.open('','_blank','width=800,height=700');
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <style>*{margin:0;padding:0;box-sizing:border-box}@page{size:A4;margin:12mm}
-    @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}</style>
-    </head><body>${html}<script>setTimeout(()=>{window.print();},400);<\/script></body></html>`);
+    const w = window.open('','_blank','width=900,height=700');
+    if(!w){ showAlert('Popup blocked! Browser-এ popup allow করুন।','error'); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Room Diary - ${room}</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Times New Roman',serif}
+    @page{size:A4;margin:12mm}
+    @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    .no-print{display:none}}</style>
+    </head><body>
+    <div class="no-print" style="padding:10px;background:#f1f5f9;border-bottom:1px solid #e2e8f0">
+      <button onclick="window.print()" style="padding:8px 20px;background:#1B3A6B;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px">🖨️ Print</button>
+      <button onclick="window.close()" style="margin-left:10px;padding:8px 20px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px">✕ Close</button>
+    </div>
+    ${html}</body></html>`);
     w.document.close();
   };
 
@@ -8569,9 +8572,10 @@ async function renderLiveDiary(el) {
     XLSX.writeFile(wb,`Attendance_${room}_${date}_${sess}.xlsx`);
     showAlert('✅ Exported!','success');
   };
+} // end renderLiveDiary
 
 // ══════════════════════════════════════════════════════════════════════════════
-// NEXT EXAM SETUP — 2nd Summative template + copy from previous
+// NEXT EXAM SETUP
 // ══════════════════════════════════════════════════════════════════════════════
 async function renderNextExam(el) {
   const [exams, tts, teachers, settings] = await Promise.all([
