@@ -449,7 +449,7 @@ async function apiFetch(ep, method='GET', body=null) {
     if (token) opts.headers['Authorization'] = 'Bearer '+token;
     if (body)  opts.body = JSON.stringify(body);
     try {
-        const r = await fetch(API_BASE+ep, { ...opts, signal:AbortSignal.timeout(12000) });
+        const r = await fetch(API_BASE+ep, { ...opts, signal:AbortSignal.timeout(30000) });
         if (r.status===401) {
             // Token invalid — clear token silently, use localStorage fallback
             localStorage.removeItem(JWT_KEY);
@@ -603,7 +603,11 @@ function startApp(name, role, synced) {
     document.getElementById('syncBadge').className = 'sync-badge '+(synced?'sync-ok':'sync-fail');
     document.getElementById('syncBadge').innerHTML = synced ? '☁️ Cloud Sync ✓' : '💾 Connecting...';
     document.getElementById('syncBadge').style.cursor = 'pointer';
-    document.getElementById('syncBadge').onclick = checkSync;
+    document.getElementById('syncBadge').onclick = () => {
+        const badge = document.getElementById('syncBadge');
+        if(badge) { badge.innerHTML='⏳ Connecting...'; badge.className='sync-badge sync-fail'; }
+        checkSync();
+    };
 
     // Load dashboard immediately
     showPage('dashboard');
@@ -611,39 +615,70 @@ function startApp(name, role, synced) {
 
     // Preload all collections — retry up to 3 times if backend sleeping
     const tryPreload = async (attempt=1) => {
+        const badge = document.getElementById('syncBadge');
+        if(badge) {
+            badge.className = 'sync-badge sync-fail';
+            badge.innerHTML = attempt===1 ? '⏳ Connecting...' : `⏳ Retry ${attempt}/3...`;
+        }
         try {
             await DB.preloadAll();
-            checkSync();
+            if(badge){ badge.className='sync-badge sync-ok'; badge.innerHTML='☁️ Cloud Sync ✓'; }
             // Refresh dashboard after data loads
-            const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','');
-            if(curPage==='dashboard') renderDashboard(document.getElementById('mainContent'));
+            const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','') || 'dashboard';
+            showPage(curPage);
         } catch(e) {
             if(attempt < 3) {
-                setTimeout(()=>tryPreload(attempt+1), 5000 * attempt);
+                setTimeout(()=>tryPreload(attempt+1), 8000);
             } else {
-                checkSync();
+                if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='💾 Retry ↺'; }
             }
         }
     };
-    setTimeout(()=>tryPreload(), 1500);
+    setTimeout(()=>tryPreload(), 500);
 }
 
 async function checkSync() {
     const badge = document.getElementById('syncBadge');
     if(!badge) return;
-    badge.textContent = '🔄 Checking...';
+    badge.className = 'sync-badge sync-fail';
+    badge.innerHTML = '🔄 Syncing...';
     try {
-        const r = await fetch(API_BASE+'/api/health', {signal:AbortSignal.timeout(10000)});
+        const r = await fetch(API_BASE+'/api/health', {signal:AbortSignal.timeout(30000)});
         if(r.ok || r.status===404) {
             badge.className = 'sync-badge sync-ok';
-            badge.textContent = '☁️ Cloud Sync ✓';
-            badge.title = 'Connected to MongoDB — data synced';
+            badge.innerHTML = '☁️ Cloud Sync ✓';
+            badge.title = 'Connected to MongoDB';
+            // Force reload all data from server
+            await forceReloadAll();
         } else throw new Error();
     } catch(e) {
         badge.className = 'sync-badge sync-fail';
-        badge.textContent = '💾 Local Mode';
-        badge.title = 'Backend offline — data saved locally. Click to retry.';
+        badge.innerHTML = '💾 Retry ↺';
+        badge.title = 'Backend offline — click to retry';
     }
+}
+
+async function forceReloadAll() {
+    const keys = ['exams','examTimetables','students','teachers','seatingPlans',
+                  'invigilatorRosters','halls','settings','questionPapers',
+                  'answerScripts','classes'];
+    // Clear all timestamps to force fresh fetch
+    keys.forEach(k => localStorage.setItem('_ts_'+k, '0'));
+    // Fetch all fresh
+    await Promise.allSettled(keys.map(async k => {
+        try {
+            const data = await apiFetch('/api/'+k);
+            const arr  = Array.isArray(data) ? data : (data.data||[]);
+            if(arr.length > 0 || !localStorage.getItem('_c_'+k)) {
+                localStorage.setItem('_c_'+k, JSON.stringify(arr));
+            }
+            localStorage.setItem('_ts_'+k, String(Date.now()));
+        } catch(e) {}
+    }));
+    // Reload current page
+    const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','') || 'dashboard';
+    showPage(curPage);
+    showAlert('✅ Data refreshed from server!','success');
 }
 
 function doLogout() {
