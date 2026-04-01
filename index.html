@@ -2414,41 +2414,100 @@ async function reprinkPlan(id) {
     const plans = await DB.get('seatingPlans');
     const p = plans.find(x=>x.id===id);
     if(!p){showAlert('Plan not found.','error');return;}
-    const [exams,settings]=await Promise.all([DB.get('exams'),DB.getObj('settings')]);
-    const exam=exams.find(e=>String(e.id)===String(p.examId));
-    const schoolName=settings.schoolName||'Ramnagar High School (H.S.)';
-    const rooms=[...new Set(p.plan.map(s=>s.roomName))];
-    let html='';
+    const [exams, settings, allStudents] = await Promise.all([
+        DB.get('exams'), DB.getObj('settings'), DB.get('students')
+    ]);
+    const schoolName = settings.schoolName||'RAMNAGAR HIGH SCHOOL (H.S.)';
+    const prin       = settings.principalName||'Dasarath Bagdi';
+
+    // Parse rolls string → array of roll numbers
+    const parseRolls = (rollsStr) => {
+        if(!rollsStr||rollsStr==='p') return [];
+        const rolls=[];
+        rollsStr.split(',').forEach(seg=>{
+            seg=seg.trim().replace(/[–—]/g,'-');
+            if(seg.includes('-')){
+                const[a,b]=seg.split('-').map(s=>parseInt(s.trim()));
+                if(!isNaN(a)&&!isNaN(b)) for(let i=a;i<=b;i++) rolls.push(i);
+            } else { const n=parseInt(seg); if(!isNaN(n)) rolls.push(n); }
+        });
+        return rolls;
+    };
+
+    const findStudent = (cls,sec,roll) => allStudents.find(s=>
+        (s.class===cls||s.classId===cls) &&
+        (s.section===sec||!sec) &&
+        (parseInt(s.roll)===roll||String(s.roll)===String(roll))
+    );
+
+    // Build per-room print pages
+    const rooms = [...new Set((p.plan||[]).map(s=>s.roomName))];
+    let html = '';
+
     rooms.forEach(rn=>{
-        const rs=p.plan.filter(s=>s.roomName===rn);
-        const cls=[...new Set(rs.map(s=>s.class))].join(', ');
-        html+=`<div style="page-break-after:always;margin-bottom:24px;font-family:Arial,sans-serif">
-          <div style="text-align:center;border-bottom:2px solid #1e3c72;padding-bottom:10px;margin-bottom:12px">
-            <div style="font-size:18px;font-weight:700;color:#1e3c72">🏫 ${schoolName}</div>
-            <div style="font-size:13px;color:#2a5298">Seating Plan — ${p.examName||''}</div>
+        const roomEntries = (p.plan||[]).filter(s=>s.roomName===rn);
+        // Expand to individual students
+        let students = [];
+        let seatNo = 1;
+        roomEntries.forEach(entry=>{
+            const rolls = parseRolls(entry.rolls||'');
+            rolls.forEach(roll=>{
+                const stu = findStudent(entry.class, entry.section, roll);
+                students.push({
+                    seatNo: seatNo++,
+                    roll,
+                    name: stu?.name||'—',
+                    class: entry.class||'',
+                    section: entry.section||'',
+                    gender: entry.gender||'',
+                    half: entry.half||''
+                });
+            });
+        });
+
+        if(!students.length) return;
+        const clsList = [...new Set(roomEntries.map(e=>e.class))].join(', ');
+        const halfLabel = [...new Set(roomEntries.map(e=>e.half))].join(' & ');
+        const genderLabel = [...new Set(roomEntries.map(e=>e.gender))].join('/');
+
+        html += `<div style="page-break-after:always;font-family:'Times New Roman',serif;padding:10px">
+          <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:10px;margin-bottom:12px">
+            <div style="font-size:16pt;font-weight:700;color:#1B3A6B">${schoolName}</div>
+            <div style="font-size:11pt;color:#2C4F8C;margin-top:2px">Seating Plan — ${p.examName||''}</div>
           </div>
-          <div style="background:#1e3c72;color:#fff;padding:9px 14px;border-radius:6px;font-weight:700;font-size:13px;display:flex;justify-content:space-between;margin-bottom:10px">
-            <span>🚪 ${rn}</span><span>Classes: ${cls} | ${rs.length} students</span>
+          <div style="background:#1B3A6B;color:#fff;padding:8px 14px;border-radius:6px;
+                      font-weight:700;font-size:13pt;display:flex;justify-content:space-between;margin-bottom:10px">
+            <span>🚪 Room: ${rn}</span>
+            <span>${genderLabel} | ${halfLabel} | Classes: ${clsList} | ${students.length} Students</span>
           </div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px">
-            <thead><tr style="background:#2a5298;color:#fff">
-              <th style="padding:7px 10px;text-align:center">Seat</th>
-              <th style="padding:7px 10px">Roll</th>
-              <th style="padding:7px 10px">Name</th>
-              <th style="padding:7px 10px">Class</th>
-              <th style="padding:7px 10px;text-align:center">Sec</th>
+          <table style="width:100%;border-collapse:collapse;font-size:11pt">
+            <thead><tr style="background:#2C4F8C;color:#fff">
+              <th style="padding:6px 8px;border:1px solid #aaa;text-align:center;width:50px">Seat#</th>
+              <th style="padding:6px 8px;border:1px solid #aaa;text-align:center;width:60px">Roll</th>
+              <th style="padding:6px 8px;border:1px solid #aaa;text-align:left">Student Name</th>
+              <th style="padding:6px 8px;border:1px solid #aaa;text-align:center;width:70px">Class</th>
+              <th style="padding:6px 8px;border:1px solid #aaa;text-align:center;width:50px">Sec</th>
+              <th style="padding:6px 8px;border:1px solid #aaa;text-align:center;width:100px">Signature</th>
             </tr></thead>
-            <tbody>${rs.map((s,i)=>`<tr style="background:${i%2?'#f0f4ff':'#fff'}">
-              <td style="padding:7px 10px;border:1px solid #ddd;text-align:center"><b>${s.seatNo}</b></td>
-              <td style="padding:7px 10px;border:1px solid #ddd">${s.roll}</td>
-              <td style="padding:7px 10px;border:1px solid #ddd">${s.name}</td>
-              <td style="padding:7px 10px;border:1px solid #ddd">${s.class}</td>
-              <td style="padding:7px 10px;border:1px solid #ddd;text-align:center">${s.section}</td>
-            </tr>`).join('')}</tbody>
+            <tbody>
+              ${students.map((s,i)=>`<tr style="background:${i%2===0?'#f0f4ff':'#fff'}">
+                <td style="padding:6px 8px;border:1px solid #dde;text-align:center;font-weight:700">${s.seatNo}</td>
+                <td style="padding:6px 8px;border:1px solid #dde;text-align:center;font-weight:700;color:#1B3A6B">${s.roll}</td>
+                <td style="padding:6px 8px;border:1px solid #dde">${s.name}</td>
+                <td style="padding:6px 8px;border:1px solid #dde;text-align:center">Class ${s.class}</td>
+                <td style="padding:6px 8px;border:1px solid #dde;text-align:center">${s.section}</td>
+                <td style="padding:6px 8px;border:1px solid #dde"></td>
+              </tr>`).join('')}
+            </tbody>
           </table>
-          <div style="text-align:right;font-size:11px;color:#888;margin-top:6px">Invigilator Signature: _______________</div>
+          <div style="display:flex;justify-content:space-between;margin-top:14px;font-size:10pt;color:#475569">
+            <div>Invigilator Signature: ___________________________</div>
+            <div>Head of Exam: ___________________________</div>
+          </div>
         </div>`;
     });
+
+    if(!html){ showAlert('No students found in seating plan.','warning'); return; }
     printPreview(html, `Seating — ${p.examName||''}`);
 }
 
@@ -2456,10 +2515,48 @@ async function exportPlanXLSX(id) {
     const plans = await DB.get('seatingPlans');
     const p = plans.find(x=>x.id===id);
     if(!p) return;
-    const ws=XLSX.utils.json_to_sheet(p.plan.map(s=>({'Room':s.roomName,'Seat No':s.seatNo,'Roll No':s.roll,'Name':s.name,'Class':s.class,'Section':s.section})));
-    ws['!cols']=[{wch:14},{wch:8},{wch:10},{wch:24},{wch:12},{wch:8}];
-    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Seating');
-    XLSX.writeFile(wb,`Seating_${p.examName||'Plan'}.xlsx`);
+    const allStudents = await DB.get('students');
+
+    const parseRolls = (rollsStr) => {
+        if(!rollsStr||rollsStr==='p') return [];
+        const rolls=[];
+        rollsStr.split(',').forEach(seg=>{
+            seg=seg.trim().replace(/[–—]/g,'-');
+            if(seg.includes('-')){const[a,b]=seg.split('-').map(s=>parseInt(s.trim()));if(!isNaN(a)&&!isNaN(b))for(let i=a;i<=b;i++)rolls.push(i);}
+            else{const n=parseInt(seg);if(!isNaN(n))rolls.push(n);}
+        });
+        return rolls;
+    };
+
+    const rows = [];
+    let seatNo = 1;
+    (p.plan||[]).forEach(entry=>{
+        const rolls = parseRolls(entry.rolls||'');
+        rolls.forEach(roll=>{
+            const stu = allStudents.find(s=>
+                (s.class===entry.class||s.classId===entry.class) &&
+                (s.section===entry.section||!entry.section) &&
+                (parseInt(s.roll)===roll||String(s.roll)===String(roll))
+            );
+            rows.push({
+                'Seat No': seatNo++,
+                'Room': entry.roomName,
+                'Half': entry.half||'',
+                'Gender': entry.gender||'',
+                'Roll': roll,
+                'Name': stu?.name||'—',
+                'Class': entry.class,
+                'Section': entry.section
+            });
+        });
+    });
+
+    if(!rows.length){ showAlert('No data to export.','warning'); return; }
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{wch:8},{wch:8},{wch:10},{wch:8},{wch:6},{wch:28},{wch:8},{wch:8}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Seating');
+    XLSX.writeFile(wb, `Seating_${p.examName||'Plan'}.xlsx`);
     showAlert('✅ Excel exported!','success');
 }
 
