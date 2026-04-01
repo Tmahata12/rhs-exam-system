@@ -464,9 +464,8 @@ async function apiFetch(ep, method='GET', body=null) {
 }
 
 const DB = {
-    // 30 minutes cache — data doesn't change that fast during exam
-    _ttl: 30 * 60 * 1000,
-    // Throttle bgSync — don't spam the server
+    // 2 hour cache — keeps data across page navigations
+    _ttl: 2 * 60 * 60 * 1000,
     _bgActive: {},
 
     async get(key) {
@@ -474,9 +473,9 @@ const DB = {
         const tsKey  = '_ts_'+key;
         const cached = localStorage.getItem('_c_'+key);
         const ts     = parseInt(localStorage.getItem(tsKey)||'0');
-        // Return cache immediately if fresh
+        // Return cache immediately if fresh (within TTL)
         if(cached && (now - ts) < this._ttl) {
-            if((now - ts) > 60000) this._bgSync(key); // refresh after 1 min in bg
+            if((now - ts) > 5*60*1000) this._bgSync(key); // bg refresh after 5 min
             return JSON.parse(cached);
         }
         // Fetch from server
@@ -487,7 +486,9 @@ const DB = {
             localStorage.setItem(tsKey, String(Date.now()));
             return arr;
         } catch(e) {
-            return cached ? JSON.parse(cached) : [];
+            // Fallback to cache even if stale — don't lose data on network error
+            if(cached) return JSON.parse(cached);
+            return [];
         }
     },
 
@@ -504,14 +505,11 @@ const DB = {
     async set(key, value) {
         // Write to LocalStorage immediately (instant UI)
         localStorage.setItem('_c_'+key, JSON.stringify(value));
-        // Mark as just-written (fresh) — other reads will use this immediately
+        // Mark as fresh — current session will use this cache
         localStorage.setItem('_ts_'+key, String(Date.now()));
         // Sync to MongoDB
         try {
             await apiFetch('/api/'+key+'/bulk','POST',{data:value});
-            // After confirmed server write: mark stale so NEXT page visit re-fetches from DB
-            // This ensures data is always consistent after save
-            setTimeout(() => localStorage.setItem('_ts_'+key, '0'), 100);
         }
         catch(e) { console.warn('DB.set offline:', e.message); }
     },
@@ -547,15 +545,23 @@ const DB = {
     },
 
     // Preload all common collections in parallel (call on login)
-    preloadAll() {
+    async preloadAll() {
         const keys = ['exams','examTimetables','students','teachers','seatingPlans',
                       'invigilatorRosters','halls','settings','questionPapers',
-                      'answerScripts','classes'];
-        // Only preload if cache is stale
-        keys.forEach(k=>{
-            const ts = parseInt(localStorage.getItem('_ts_'+k)||'0');
-            if(Date.now()-ts > this._ttl) this._bgSync(k);
-        });
+                      'answerScripts','classes','circulars'];
+        // Force fetch all from server (ignore cache age) to get fresh data
+        const results = await Promise.allSettled(keys.map(async k=>{
+            try {
+                const data = await apiFetch('/api/'+k);
+                const arr  = Array.isArray(data) ? data : (data.data||[]);
+                // Only update cache if server returned data (don't overwrite good cache with empty)
+                if(arr.length > 0 || !localStorage.getItem('_c_'+k)) {
+                    localStorage.setItem('_c_'+k, JSON.stringify(arr));
+                    localStorage.setItem('_ts_'+k, String(Date.now()));
+                }
+            } catch(e) { /* keep existing cache */ }
+        }));
+        return results;
     }
 };
 
@@ -595,20 +601,31 @@ function startApp(name, role, synced) {
     app.style.display = 'flex';
     document.getElementById('headerUser').textContent = name;
     document.getElementById('syncBadge').className = 'sync-badge '+(synced?'sync-ok':'sync-fail');
-    document.getElementById('syncBadge').textContent = synced ? '☁️ Cloud Sync' : '💾 Local Mode';
-    document.getElementById('syncBadge').title = synced ? 'Connected to MongoDB' : 'Click to retry cloud connection';
+    document.getElementById('syncBadge').innerHTML = synced ? '☁️ Cloud Sync ✓' : '💾 Connecting...';
     document.getElementById('syncBadge').style.cursor = 'pointer';
     document.getElementById('syncBadge').onclick = checkSync;
 
-    // Load dashboard immediately — don't wait for sync check
+    // Load dashboard immediately
     showPage('dashboard');
     restoreSidebarState();
 
-    // Preload all collections in background after 1s (don't block dashboard)
-    setTimeout(()=>{
-        DB.preloadAll();
-        checkSync();
-    }, 1000);
+    // Preload all collections — retry up to 3 times if backend sleeping
+    const tryPreload = async (attempt=1) => {
+        try {
+            await DB.preloadAll();
+            checkSync();
+            // Refresh dashboard after data loads
+            const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','');
+            if(curPage==='dashboard') renderDashboard(document.getElementById('mainContent'));
+        } catch(e) {
+            if(attempt < 3) {
+                setTimeout(()=>tryPreload(attempt+1), 5000 * attempt);
+            } else {
+                checkSync();
+            }
+        }
+    };
+    setTimeout(()=>tryPreload(), 1500);
 }
 
 async function checkSync() {
@@ -10467,15 +10484,17 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const role=sessionStorage.getItem('ems_role');
     if(user&&role) startApp(user,role,false);
 
-    // ── Keep-alive ping every 5 min to prevent Render.com sleep ──
+    // ── Keep-alive ping every 4 min to prevent Render.com sleep ──
     const BACKEND = 'https://rhs-prms-backend.onrender.com';
     const ping = () => {
-        fetch(`${BACKEND}/api/ping`, {method:'GET', signal:AbortSignal.timeout(5000)})
-            .catch(()=>{}); // silently ignore errors
+        fetch(`${BACKEND}/api/ping`, {method:'GET', signal:AbortSignal.timeout(8000)})
+            .then(r=>{ if(r.ok){ const b=document.getElementById('syncBadge'); if(b&&b.classList.contains('sync-fail')){b.className='sync-badge sync-ok';b.innerHTML='☁️ Cloud Sync ✓';} } })
+            .catch(()=>{});
     };
-    // Ping immediately on load, then every 5 min
+    // Wake up backend immediately, then keep alive every 4 min
     ping();
-    setInterval(ping, 5 * 60 * 1000);
+    setTimeout(ping, 8000);  // second ping 8s later in case first fails
+    setInterval(ping, 4 * 60 * 1000);
 
     // Update loader message during load
     const loadMsg = document.getElementById('loadMsg');
