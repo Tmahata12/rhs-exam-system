@@ -4124,75 +4124,132 @@ async function importRosterXLSX(event) {
 
 // ── STUDENTS ──────────────────────────────────────────────────────────────────
 async function renderStudents(el) {
-    const [students, classes, exams] = await Promise.all([DB.get('students'), DB.get('classes'), DB.get('exams')]);
-    const classOpts = classes.map(c=>`<option value="${c.name||c.className}">${c.name||c.className}</option>`).join('');
+    const [students, exams] = await Promise.all([DB.get('students'), DB.get('exams')]);
+    const classOpts = ['V','VI','VII','VIII','IX','X'].map(c=>`<option value="${c}">Class ${c}</option>`).join('');
     el.innerHTML = `
     <div class="page-title">👨‍🎓 Student Management</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-    <div class="card">
-      <div class="card-title">➕ Add Student</div>
-      <div class="form-group" style="margin-bottom:12px;"><label>Roll Number *</label><input id="sRoll" placeholder="e.g., 2025001"></div>
-      <div class="form-group" style="margin-bottom:12px;"><label>Student Name *</label><input id="sName" placeholder="Full name"></div>
-      <div class="form-group" style="margin-bottom:12px;"><label>Class *</label>
-        <select id="sClass"><option value="">--Select--</option>${classOpts}</select>
+    <div style="padding:0 24px 24px">
+    <div style="display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start">
+
+    <!-- ADD FORM -->
+    <div class="card" style="margin:0;position:sticky;top:12px">
+      <div class="card-title">➕ নতুন Student যোগ করুন</div>
+
+      <div class="form-row" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="form-group"><label>Roll No *</label>
+          <input id="sRoll" type="number" placeholder="e.g. 45" min="1"
+            style="font-size:16px;font-weight:700;color:var(--primary)">
+        </div>
+        <div class="form-group"><label>Class *</label>
+          <select id="sClass"><option value="">--Class--</option>${classOpts}</select>
+        </div>
       </div>
-      <div class="form-group" style="margin-bottom:12px;"><label>Section</label><input id="sSection" placeholder="A / B / C" maxlength="2"></div>
-      <div class="form-group" style="margin-bottom:12px;"><label>Father's Name</label><input id="sFather" placeholder="Father's name"></div>
-      <div class="form-group" style="margin-bottom:12px;"><label>Mother's Name</label><input id="sMother" placeholder="Mother's name"></div>
-      <div class="form-group" style="margin-bottom:16px;"><label>Date of Birth</label><input type="date" id="sDob"></div>
-      <div class="btn-group">
-        <button class="btn btn-primary" onclick="addStudentItem()">➕ Add Student</button>
-        <button class="btn btn-warning" onclick="downloadStudentXLSX()">📥 Download Template</button>
-        <button class="btn btn-success" onclick="document.getElementById('stuFile').click()">📤 Bulk Upload</button>
-        <input type="file" id="stuFile" accept=".xlsx,.xls" style="display:none" onchange="bulkUploadStudents(event)">
-      </div>
-      <!-- Gate Pass -->
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">🎟️ Gate Pass Print</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <select id="gp-exam-sel" style="flex:1;min-width:160px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--card);color:var(--text);font-family:inherit;font-size:12px">
-            <option value="">--Select Exam--</option>${exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('')}
+      <div class="form-row" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="form-group"><label>Section *</label>
+          <select id="sSection">
+            <option value="A">A (Boys)</option>
+            <option value="B">B (Girls)</option>
           </select>
-          <button class="btn btn-info btn-sm" onclick="printGatePassFromStudents()">🎟️ Print Gate Passes</button>
+        </div>
+        <div class="form-group"><label>Gender</label>
+          <select id="sGender">
+            <option value="Male">Male (Boys)</option>
+            <option value="Female">Female (Girls)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:10px"><label>Student Name * (CAPITAL LETTERS)</label>
+        <input id="sName" placeholder="e.g. SUPARNA MAJI"
+          oninput="this.value=this.value.toUpperCase()"
+          style="font-weight:600;font-size:14px">
+      </div>
+      <div class="form-row" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="form-group"><label>Father's Name</label>
+          <input id="sFather" placeholder="Father's name"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="form-group"><label>Mother's Name</label>
+          <input id="sMother" placeholder="Mother's name"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:16px"><label>Date of Birth</label>
+        <input type="date" id="sDob">
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-primary" onclick="addStudentItem()" style="flex:1;justify-content:center">
+          ➕ Add Student
+        </button>
+      </div>
+      <div id="stu-add-status" style="margin-top:10px"></div>
+
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px">📤 Bulk Upload / Download</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-warning btn-sm" onclick="downloadStudentXLSX()">📥 Template</button>
+          <button class="btn btn-success btn-sm" onclick="document.getElementById('stuFile').click()">📤 Excel Upload</button>
+          <input type="file" id="stuFile" accept=".xlsx,.xls" style="display:none" onchange="bulkUploadStudents(event)">
+        </div>
+      </div>
+
+      <!-- Gate Pass -->
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="font-size:12px;font-weight:700;color:var(--text-2);margin-bottom:8px">🎟️ Gate Pass Print</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="gp-exam-sel" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font-family:inherit;font-size:12px">
+            <option value="">--Select Exam--</option>
+            ${exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('')}
+          </select>
+          <button class="btn btn-info btn-sm" onclick="printGatePassFromStudents()">🎟️ Print</button>
         </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">👨‍🎓 Students (${students.length} total)</div>
+
+    <!-- STUDENT LIST -->
+    <div class="card" style="margin:0">
+      <div class="card-title">
+        👨‍🎓 Students
+        <span style="margin-left:auto;font-size:12px;font-weight:400;color:var(--text-2)" id="stu-count">${students.length} total</span>
+      </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <input id="stuSearch" placeholder="🔍 Search by name or roll..." oninput="filterStudentsTable()"
-          style="flex:1;min-width:160px;padding:8px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+        <input id="stuSearch" placeholder="🔍 Name বা Roll search করুন..." oninput="filterStudentsTable()"
+          style="flex:2;min-width:160px;padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
         <select id="stuClassFilter" onchange="filterStudentsTable()"
-          style="padding:8px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+          style="padding:8px 11px;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
           <option value="">All Classes</option>
-          ${[...new Set(students.map(s=>s.class||s.classId||''))].filter(Boolean).sort((a,b)=>{
-            const o=['V','VI','VII','VIII','IX','X'];
-            return (o.indexOf(a)-o.indexOf(b)) || a.localeCompare(b);
-          }).map(c=>`<option value="${c}">Class ${c}</option>`).join('')}
+          ${['V','VI','VII','VIII','IX','X'].map(c=>`<option value="${c}">Class ${c}</option>`).join('')}
         </select>
         <select id="stuSecFilter" onchange="filterStudentsTable()"
-          style="padding:8px 11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
+          style="padding:8px 11px;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:13px;background:var(--card);color:var(--text)">
           <option value="">All Sections</option>
-          ${[...new Set(students.map(s=>s.section||''))].filter(Boolean).sort().map(s=>`<option value="${s}">Section ${s}</option>`).join('')}
+          <option value="A">Section A</option>
+          <option value="B">Section B</option>
         </select>
-        <span id="stu-count" style="font-size:12px;color:var(--text-2);align-self:center">${students.length} students</span>
       </div>
-      <div class="table-wrap" style="max-height:500px;overflow-y:auto;">
-        <table><thead><tr><th>Roll</th><th>Name</th><th>Class</th><th>Section</th><th>Action</th></tr></thead>
-        <tbody id="stuTbody">${students.length ? students.slice(0,200).map(s=>`
+      <div class="table-wrap" style="max-height:600px;overflow-y:auto;">
+        <table><thead><tr>
+          <th style="width:60px">Roll</th><th>Name</th>
+          <th style="width:80px">Class</th><th style="width:70px">Sec</th>
+          <th style="width:50px">Action</th>
+        </tr></thead>
+        <tbody id="stuTbody">
+        ${students.length ? students.slice(0,200).map(s=>`
           <tr data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
-            <td style="font-weight:600;color:var(--primary)">${s.roll}</td>
-            <td>${s.name}</td>
-            <td style="text-align:center"><span class="badge badge-blue">${s.class||s.classId||'—'}</span></td>
-            <td style="text-align:center">${s.section||'—'}</td>
-            <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${s.roll}')">🗑️</button></td>
-          </tr>`).join('') : emptyRow(5,'No students yet. Data Hub → Seed ALL থেকে import করুন.')}
+            <td style="font-weight:700;color:var(--primary)">${s.roll}</td>
+            <td style="font-weight:500">${s.name||'—'}</td>
+            <td style="text-align:center"><span class="badge badge-blue">Cl.${s.class||s.classId||'?'}</span></td>
+            <td style="text-align:center"><span class="badge badge-${s.section==='A'?'blue':'purple'}">Sec ${s.section||'?'}</span></td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${s.id||s.roll}')">🗑️</button></td>
+          </tr>`).join('')
+        : `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-2)">
+            কোনো student নেই। উপরের form থেকে add করুন বা Data Hub → Seed ALL করুন।
+          </td></tr>`}
         ${students.length > 200 ? `<tr><td colspan="5" style="text-align:center;padding:10px;color:var(--text-2);font-size:12px">
-          ... আরো ${students.length-200} জন আছে। Class filter করুন দেখতে।
+          ... আরো ${students.length-200} জন। Class filter করুন।
         </td></tr>`:''}
-        </tbody>
-        </table>
+        </tbody></table>
       </div>
+    </div>
     </div></div>`;
     window._allStudents = students;
 }
@@ -4241,20 +4298,74 @@ function filterStudentsTable() {
 }
 
 async function addStudentItem() {
-    const roll=document.getElementById('sRoll').value.trim();
-    const name=document.getElementById('sName').value.trim();
-    const cls=document.getElementById('sClass').value;
-    if(!roll||!name||!cls){showAlert('Roll, Name & Class required.','error');return;}
-    const students=await DB.get('students');
-    if(students.find(s=>s.roll===roll&&(s.class||s.classId)===cls)){showAlert('Duplicate roll number in this class.','error');return;}
-    students.push({id:Date.now().toString(),roll,name,class:cls,
-        section:document.getElementById('sSection').value.toUpperCase(),
-        father:document.getElementById('sFather').value,
-        mother:document.getElementById('sMother').value,
-        dob:document.getElementById('sDob').value});
-    await DB.set('students',students);
-    showAlert('✅ Student added!','success');
-    renderStudents(document.getElementById('mainContent'));
+    const roll = document.getElementById('sRoll').value.trim();
+    const name = document.getElementById('sName').value.trim().toUpperCase();
+    const cls  = document.getElementById('sClass').value;
+    const sec  = document.getElementById('sSection').value;
+    const statusEl = document.getElementById('stu-add-status');
+
+    if(!roll){showAlert('Roll Number দিন।','error');document.getElementById('sRoll').focus();return;}
+    if(!name){showAlert('Student Name দিন।','error');document.getElementById('sName').focus();return;}
+    if(!cls){showAlert('Class select করুন।','error');document.getElementById('sClass').focus();return;}
+
+    const students = await DB.get('students');
+    const dup = students.find(s=>
+        String(s.roll)===String(roll) && (s.class||s.classId)===cls && (!sec||s.section===sec)
+    );
+    if(dup){ showAlert(`Roll ${roll} Class ${cls}-${sec} already exists: ${dup.name}`,'warning'); return; }
+
+    const newStu = {
+        id: `stu_${cls}_${sec}_${roll}_${Date.now()}`,
+        roll: parseInt(roll)||roll,
+        name,
+        class: cls,
+        section: sec,
+        gender: document.getElementById('sGender').value,
+        father: document.getElementById('sFather').value.trim().toUpperCase(),
+        mother: document.getElementById('sMother').value.trim().toUpperCase(),
+        dob:    document.getElementById('sDob').value,
+        createdAt: new Date().toISOString()
+    };
+    students.push(newStu);
+    await DB.set('students', students);
+    DB.invalidate('students');
+
+    if(statusEl) statusEl.innerHTML = `
+      <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;font-size:13px;color:#065f46;display:flex;gap:8px;align-items:center">
+        <span style="font-size:18px">✅</span>
+        <div><strong>${name}</strong> (Roll ${roll}, Class ${cls}-${sec}) added!<br>
+        <span style="font-size:11px">Total students: ${students.length}</span></div>
+      </div>`;
+
+    // Clear form but keep class/section for easy batch entry
+    document.getElementById('sRoll').value='';
+    document.getElementById('sName').value='';
+    document.getElementById('sFather').value='';
+    document.getElementById('sMother').value='';
+    document.getElementById('sDob').value='';
+    document.getElementById('sRoll').focus();
+
+    // Update table live without full re-render
+    const tbody = document.getElementById('stuTbody');
+    if(tbody) {
+        const newRow = document.createElement('tr');
+        newRow.setAttribute('data-roll',roll);
+        newRow.setAttribute('data-name',name.toLowerCase());
+        newRow.setAttribute('data-class',cls);
+        newRow.setAttribute('data-sec',sec);
+        newRow.innerHTML = `
+          <td style="font-weight:700;color:var(--primary)">${roll}</td>
+          <td style="font-weight:500">${name}</td>
+          <td style="text-align:center"><span class="badge badge-blue">Cl.${cls}</span></td>
+          <td style="text-align:center"><span class="badge badge-${sec==='A'?'blue':'purple'}">Sec ${sec}</span></td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${newStu.id}')">🗑️</button></td>`;
+        newRow.style.background='#f0fdf4';
+        tbody.prepend(newRow);
+        setTimeout(()=>newRow.style.background='',1500);
+    }
+    const countEl = document.getElementById('stu-count');
+    if(countEl) countEl.textContent = students.length+' total';
+    window._allStudents = students;
 }
 
 async function deleteStudentItem(roll) {
