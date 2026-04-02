@@ -716,7 +716,7 @@ async function apiFetch(ep, method='GET', body=null) {
     const opts   = { method, headers:{'Content-Type':'application/json'} };
     if (token) opts.headers['Authorization'] = 'Bearer '+token;
     if (body)  opts.body = JSON.stringify(body);
-    const r = await fetch(API_BASE+ep, { ...opts, signal:AbortSignal.timeout(30000) });
+    const r = await fetch(API_BASE+ep, { ...opts, signal:AbortSignal.timeout(12000) });
     if (r.status===401) {
         localStorage.removeItem(JWT_KEY);
         throw new Error('UNAUTHORIZED');
@@ -815,7 +815,7 @@ const DB = {
 
         // Check if server is reachable (any response = server is up)
         try {
-            const r = await fetch(API_BASE+'/api/exams', {signal:AbortSignal.timeout(30000)});
+            const r = await fetch(API_BASE+'/api/exams', {signal:AbortSignal.timeout(12000)});
             if(!r.ok && r.status!==401 && r.status!==404) throw new Error('HTTP '+r.status);
         } catch(e) {
             if(e.name==='AbortError' || e.message?.includes('fetch')) throw e;
@@ -858,54 +858,83 @@ async function doLogin() {
         if(errEl){ errEl.textContent = '⚠️ '+msg; errEl.style.display='block'; }
     };
     const hideErr = () => { if(errEl) errEl.style.display='none'; };
+    const setBtn = (txt, disabled=false) => {
+        if(btn){ btn.textContent=txt; btn.disabled=disabled; }
+    };
 
     if (!role||!user||!pass) { showErr('Role, Username ও Password সব দিন।'); return; }
     hideErr();
-    if(btn){ btn.textContent='⏳ Signing in...'; btn.disabled=true; }
+    setBtn('⏳ Connecting...', true);
+
+    // Fast fetch with short timeout for login
+    const quickFetch = (url, opts={}, ms=6000) =>
+        fetch(url, {...opts, signal:AbortSignal.timeout(ms)});
 
     try {
-        // Try backend auth
+        // Step 1: Try backend auth (6 sec max)
         try {
-            const data = await apiFetch('/api/auth/login','POST',{username:user,password:pass});
-            localStorage.setItem(JWT_KEY, data.token);
-            if(btn){ btn.textContent='✅ Success!'; }
-            setTimeout(()=>startApp(data.user.fullName||data.user.username, role, true), 300);
-            return;
-        } catch(e) {}
-
-        // Try no-auth
-        try {
-            const testData = await fetchNoAuth('/api/exams');
-            if(Array.isArray(testData)) {
-                localStorage.setItem('EMS_NO_AUTH', '1');
-                if(btn){ btn.textContent='✅ Success!'; }
-                setTimeout(()=>startApp(user==='admin'?'AHM RHS':user, role, true), 300);
+            setBtn('⏳ Authenticating...', true);
+            const r = await quickFetch(`${API_BASE}/api/auth/login`, {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({username:user, password:pass})
+            }, 6000);
+            if(r.ok) {
+                const data = await r.json();
+                localStorage.setItem(JWT_KEY, data.token);
+                localStorage.removeItem('EMS_NO_AUTH');
+                setBtn('✅ Done!');
+                setTimeout(()=>startApp(data.user?.fullName||data.user?.username||user, role, true), 250);
                 return;
             }
-        } catch(e2) {}
+            // Auth returned error (wrong credentials)
+            if(r.status===401||r.status===403) {
+                showErr('Username বা Password সঠিক নয়।');
+                setBtn('Sign In →', false);
+                return;
+            }
+        } catch(e) {
+            // Network error / timeout — try no-auth
+        }
 
-        // Local fallback
+        // Step 2: Check if backend reachable without auth (4 sec max)
+        setBtn('⏳ Checking server...', true);
+        try {
+            const r2 = await quickFetch(`${API_BASE}/api/exams`, {}, 4000);
+            if(r2.ok) {
+                const data2 = await r2.json();
+                if(Array.isArray(data2)) {
+                    localStorage.setItem('EMS_NO_AUTH', '1');
+                    setBtn('✅ Done!');
+                    setTimeout(()=>startApp(user==='admin'?'AHM RHS':user, role, true), 250);
+                    return;
+                }
+            }
+        } catch(e2) { /* server offline */ }
+
+        // Step 3: Local fallback (instant)
+        setBtn('⏳ Offline mode...', true);
         const defaults = {
-            admin:{p:'admin123',n:'AHM RHS'},
+            admin:  {p:'admin123',  n:'AHM RHS'},
             teacher:{p:'teacher123',n:'Sample Teacher'},
-            office:{p:'office123',n:'Office Staff'}
+            office: {p:'office123', n:'Office Staff'}
         };
-        if (defaults[user] && defaults[user].p===pass) {
-            if(btn){ btn.textContent='✅ Success!'; }
-            setTimeout(()=>startApp(defaults[user].n, role, false), 300);
+        if(defaults[user] && defaults[user].p===pass) {
+            setBtn('✅ Done!');
+            setTimeout(()=>startApp(defaults[user].n, role, false), 250);
         } else {
-            showErr('Username বা Password সঠিক নয়।');
-            if(btn){ btn.textContent='Sign In →'; btn.disabled=false; }
+            showErr('Server offline। Correct username/password দিয়ে আবার try করুন।');
+            setBtn('Sign In →', false);
         }
     } catch(err) {
-        showErr('Login failed. Internet connection check করুন।');
-        if(btn){ btn.textContent='Sign In →'; btn.disabled=false; }
+        showErr('Login error। Internet connection check করুন।');
+        setBtn('Sign In →', false);
     }
 }
 
 // Fetch without JWT token
 async function fetchNoAuth(ep) {
-    const r = await fetch(API_BASE+ep, {signal:AbortSignal.timeout(20000)});
+    const r = await fetch(API_BASE+ep, {signal:AbortSignal.timeout(8000)});
     if(!r.ok) throw new Error('HTTP '+r.status);
     return r.json();
 }
@@ -1104,7 +1133,7 @@ async function checkSync() {
     badge.className = 'sync-badge sync-fail';
     badge.innerHTML = '🔄 Syncing...';
     try {
-        const r = await fetch(API_BASE+'/api/health', {signal:AbortSignal.timeout(30000)});
+        const r = await fetch(API_BASE+'/api/health', {signal:AbortSignal.timeout(12000)});
         if(r.ok || r.status===404) {
             badge.className = 'sync-badge sync-ok';
             badge.innerHTML = '☁️ Cloud Sync ✓';
@@ -6574,11 +6603,18 @@ async function printAtaGlance() {
     const logo = (typeof getSchoolLogo==='function')?getSchoolLogo():(localStorage.getItem('rhs_school_logo')||'');
 
     let body = `<div style="font-family:'Times New Roman',serif;padding:16px">
-      <div style="text-align:center;border-bottom:2px solid #1B3A6B;padding-bottom:10px;margin-bottom:14px;position:relative">
-        ${logo?`<img src="${logo}" style="position:absolute;left:0;top:0;max-width:70px;max-height:70px;object-fit:contain">`:''}
-        <div style="font-size:16pt;font-weight:700;color:#1B3A6B">${sch}</div>
-        <div style="font-size:10pt;color:#475569;margin-top:2px">${exam?.name||''} ${exam?.year||''} — At-a-Glance Attendance</div>
-        <div style="font-size:10pt;color:#1B3A6B;font-weight:600;margin-top:2px">Date: ${date}</div>
+      <div style="border-bottom:2px solid #1B3A6B;padding-bottom:10px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:12px">
+          ${logo?`<div style="flex-shrink:0;width:68px;height:68px;display:flex;align-items:center;justify-content:center">
+            <img src="${logo}" style="max-width:66px;max-height:66px;object-fit:contain;display:block">
+          </div>`:''}
+          <div style="flex:1;text-align:center">
+            <div style="font-size:16pt;font-weight:700;color:#1B3A6B">${sch}</div>
+            <div style="font-size:10pt;color:#475569;margin-top:2px">${exam?.name||''} ${exam?.year||''} — At-a-Glance Attendance</div>
+            <div style="font-size:10pt;color:#1B3A6B;font-weight:600;margin-top:2px">Date: ${date}</div>
+          </div>
+          ${logo?`<div style="flex-shrink:0;width:68px"></div>`:''}
+        </div>
       </div>`;
 
     data.forEach(({session, subj, roomData}) => {
@@ -7508,20 +7544,23 @@ function offHeader(school, examTitle, docTitle, docSub='', memoNo='', date='') {
   const logo   = localStorage.getItem('rhs_school_logo')||'';
 
   return `
-  <div class="off-hdr" style="position:relative">
-    ${logo ? `<div style="position:absolute;left:0;top:50%;transform:translateY(-50%);width:72px;text-align:center">
-      <img src="${logo}" style="max-width:68px;max-height:68px;object-fit:contain">
-    </div>` : ''}
-    <div style="padding-left:${logo?'80px':'0'};text-align:center">
-      <div class="school-name">${school}</div>
-      <div class="school-info">
-        Index No.: ${idxNo} &nbsp;|&nbsp; DISE: ${dise} &nbsp;|&nbsp;
-        H.S. Code: ${hsCode} &nbsp;|&nbsp; Ph.: ${phone}<br>
-        ${addr}
+  <div class="off-hdr">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:4px">
+      ${logo ? `<div style="flex-shrink:0;width:70px;height:70px;display:flex;align-items:center;justify-content:center">
+        <img src="${logo}" style="max-width:68px;max-height:68px;object-fit:contain;display:block">
+      </div>` : ''}
+      <div style="flex:1;text-align:center">
+        <div class="school-name">${school}</div>
+        <div class="school-info">
+          Index No.: ${idxNo} &nbsp;|&nbsp; DISE: ${dise} &nbsp;|&nbsp;
+          H.S. Code: ${hsCode} &nbsp;|&nbsp; Ph.: ${phone}<br>
+          ${addr}
+        </div>
+        <div class="school-info" style="font-weight:600;color:#1B3A6B;margin-top:1px">ESTD.: ${estd} | ${stype}</div>
       </div>
-      <div class="school-info" style="font-weight:600;color:#1B3A6B;margin-top:1px">ESTD.: ${estd} | ${stype}</div>
+      ${logo ? `<div style="flex-shrink:0;width:70px"></div>` : ''}
     </div>
-    <div class="gold-bar" style="margin:6px 0 4px"></div>
+    <div class="gold-bar" style="margin:4px 0"></div>
     <div class="doc-title">${docTitle}</div>
     ${docSub?`<div class="doc-sub">${docSub}</div>`:''}
     ${examTitle?`<div class="doc-sub" style="font-weight:600;color:#1B3A6B;margin-top:3px">${examTitle}</div>`:''}
@@ -10533,14 +10572,19 @@ async function renderSettings(el) {
     const el  = document.getElementById('st-preview');
     if(!el) return;
     el.innerHTML = `
-      <div style="text-align:center;border-bottom:3px double #1B3A6B;padding-bottom:10px;margin-bottom:8px;position:relative;font-family:'Noto Serif',Georgia,serif">
-        ${logo?`<img src="${logo}" style="position:absolute;left:0;top:0;max-width:68px;max-height:68px;object-fit:contain">`:''}
-        <div style="padding-left:${logo?'75px':'0'}">
-          <div style="font-size:15pt;font-weight:700;color:#1B3A6B">${n}</div>
-          <div style="font-size:8pt;color:#475569;margin-top:3px;font-family:Arial,sans-serif">
-            Index No.: ${idx} | DISE: ${dc} | H.S. Code: ${hs} | Ph.: ${ph}<br>${ad}
+      <div style="border-bottom:3px double #1B3A6B;padding-bottom:10px;margin-bottom:8px;font-family:'Noto Serif',Georgia,serif">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:2px">
+          ${logo?`<div style="flex-shrink:0;width:64px;height:64px;display:flex;align-items:center;justify-content:center">
+            <img src="${logo}" style="max-width:62px;max-height:62px;object-fit:contain;display:block">
+          </div>`:''}
+          <div style="flex:1;text-align:center">
+            <div style="font-size:15pt;font-weight:700;color:#1B3A6B">${n}</div>
+            <div style="font-size:8pt;color:#475569;margin-top:3px;font-family:Arial,sans-serif">
+              Index No.: ${idx} | DISE: ${dc} | H.S. Code: ${hs} | Ph.: ${ph}<br>${ad}
+            </div>
+            <div style="font-size:8pt;color:#1B3A6B;font-weight:600;margin-top:3px;font-family:Arial,sans-serif">ESTD. : ${es} | ${tp}</div>
           </div>
-          <div style="font-size:8pt;color:#1B3A6B;font-weight:600;margin-top:3px;font-family:Arial,sans-serif">ESTD. : ${es} | ${tp}</div>
+          ${logo?`<div style="flex-shrink:0;width:64px"></div>`:''}
         </div>
       </div>
       <div style="text-align:center;font-size:11pt;font-weight:700;color:#2C4F8C;font-family:Arial,sans-serif">DOCUMENT TITLE</div>
