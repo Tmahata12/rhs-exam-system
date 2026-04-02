@@ -2547,15 +2547,16 @@ async function renderSeating(el) {
           <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:12px">➕ নতুন Student / Missing Roll যোগ করুন</div>
           <div class="form-row">
             <div class="form-group"><label>Roll *</label>
-              <input id="sp-add-roll" type="number" placeholder="e.g. 46" min="1">
+              <input id="sp-add-roll" type="number" placeholder="e.g. 46" min="1"
+                oninput="spLookupStudent('add')">
             </div>
             <div class="form-group"><label>Class *</label>
-              <select id="sp-add-class">
+              <select id="sp-add-class" onchange="spLookupStudent('add')">
                 ${['V','VI','VII','VIII','IX','X'].map(c=>`<option value="${c}">Class ${c}</option>`).join('')}
               </select>
             </div>
             <div class="form-group"><label>Section *</label>
-              <select id="sp-add-section">
+              <select id="sp-add-section" onchange="spLookupStudent('add')">
                 <option value="A">A (Boys)</option>
                 <option value="B">B (Girls)</option>
               </select>
@@ -2570,6 +2571,14 @@ async function renderSeating(el) {
               <select id="sp-add-room"><option value="">--Plan select করুন--</option></select>
             </div>
           </div>
+          <!-- Student name preview -->
+          <div id="sp-add-name-preview" style="display:none;margin-bottom:10px;padding:8px 14px;background:#fff;border:1.5px solid #6ee7b7;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:10px">
+            <span style="font-size:18px">👤</span>
+            <div>
+              <div id="sp-add-name-text" style="font-weight:700;color:#065f46"></div>
+              <div id="sp-add-name-sub" style="font-size:11px;color:#6b7280"></div>
+            </div>
+          </div>
           <button class="btn btn-success" onclick="spAddStudentToRoom()">➕ Add to Room</button>
         </div>
 
@@ -2578,10 +2587,10 @@ async function renderSeating(el) {
           <div style="font-size:13px;font-weight:700;color:#1e40af;margin-bottom:12px">🔄 Student-এর Room পরিবর্তন করুন</div>
           <div class="form-row">
             <div class="form-group"><label>Class</label>
-              <select id="sp-move-class"><option value="">--</option>${['V','VI','VII','VIII','IX','X'].map(c=>`<option>${c}</option>`).join('')}</select>
+              <select id="sp-move-class" onchange="spFindCurrentRoom()">${['V','VI','VII','VIII','IX','X'].map(c=>`<option value="${c}">${c}</option>`).join('')}</select>
             </div>
             <div class="form-group"><label>Section</label>
-              <select id="sp-move-sec"><option value="A">A</option><option value="B">B</option></select>
+              <select id="sp-move-sec" onchange="spFindCurrentRoom()"><option value="A">A</option><option value="B">B</option></select>
             </div>
             <div class="form-group"><label>Roll</label>
               <input id="sp-move-roll" type="number" placeholder="Roll No" oninput="spFindCurrentRoom()">
@@ -2593,6 +2602,14 @@ async function renderSeating(el) {
               <select id="sp-move-room"><option value="">--Select--</option></select>
             </div>
           </div>
+          <!-- Name preview for move -->
+          <div id="sp-move-name-preview" style="display:none;margin-bottom:10px;padding:8px 14px;background:#fff;border:1.5px solid #93c5fd;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:10px">
+            <span style="font-size:18px">👤</span>
+            <div>
+              <div id="sp-move-name-text" style="font-weight:700;color:#1e40af"></div>
+              <div id="sp-move-name-sub" style="font-size:11px;color:#6b7280"></div>
+            </div>
+          </div>
           <button class="btn btn-primary" onclick="spMoveStudent()">🔄 Move Student</button>
         </div>
 
@@ -2601,13 +2618,21 @@ async function renderSeating(el) {
           <div style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:12px">🗑️ Student Remove করুন (absent/transferred)</div>
           <div class="form-row">
             <div class="form-group"><label>Class</label>
-              <select id="sp-del-class">${['V','VI','VII','VIII','IX','X'].map(c=>`<option>${c}</option>`).join('')}</select>
+              <select id="sp-del-class" onchange="spLookupStudent('del')">${['V','VI','VII','VIII','IX','X'].map(c=>`<option>${c}</option>`).join('')}</select>
             </div>
             <div class="form-group"><label>Section</label>
-              <select id="sp-del-sec"><option value="A">A</option><option value="B">B</option></select>
+              <select id="sp-del-sec" onchange="spLookupStudent('del')"><option value="A">A</option><option value="B">B</option></select>
             </div>
             <div class="form-group"><label>Roll</label>
-              <input id="sp-del-roll" type="number" placeholder="Roll No">
+              <input id="sp-del-roll" type="number" placeholder="Roll No" oninput="spLookupStudent('del')">
+            </div>
+          </div>
+          <!-- Name preview for remove -->
+          <div id="sp-del-name-preview" style="display:none;margin-bottom:10px;padding:8px 14px;background:#fff;border:1.5px solid #fca5a5;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:10px">
+            <span style="font-size:18px">👤</span>
+            <div>
+              <div id="sp-del-name-text" style="font-weight:700;color:#991b1b"></div>
+              <div id="sp-del-name-sub" style="font-size:11px;color:#6b7280"></div>
             </div>
           </div>
           <button class="btn btn-danger" onclick="spRemoveStudent()">🗑️ Remove from Seating</button>
@@ -3123,6 +3148,66 @@ async function whatsappPlan(id) {
 }
 
 // ── SEATING EDIT FUNCTIONS ────────────────────────────────────────────────────
+// Lookup student name by roll+class+section and show preview
+async function spLookupStudent(mode='add') {
+    const secId  = mode==='add' ? 'sp-add-section' : `sp-${mode}-sec`;
+    const roll   = parseInt(document.getElementById(`sp-${mode}-roll`)?.value);
+    const cls    = document.getElementById(`sp-${mode}-class`)?.value;
+    const sec    = document.getElementById(secId)?.value;
+    const preview= document.getElementById(`sp-${mode}-name-preview`);
+    const nameEl = document.getElementById(`sp-${mode}-name-text`);
+    const subEl  = document.getElementById(`sp-${mode}-name-sub`);
+    if(!preview||!nameEl) return;
+
+    if(!roll||!cls) { preview.style.display='none'; return; }
+
+    // Search from cached students
+    let students = [];
+    try { students = JSON.parse(localStorage.getItem('_c_students')||'[]'); }
+    catch(e) { students = await DB.get('students'); }
+
+    const stu = students.find(s=>
+        (s.class===cls||s.classId===cls) &&
+        (!sec||s.section===sec) &&
+        (parseInt(s.roll)===roll||String(s.roll)===String(roll))
+    );
+
+    preview.style.display = 'flex';
+    preview.style.flexDirection = 'column';
+    preview.style.gap = '6px';
+
+    if(stu?.name && stu.name!=='New Student') {
+        // Student found ✅
+        preview.style.borderColor = mode==='add'?'#6ee7b7':mode==='del'?'#fca5a5':'#93c5fd';
+        preview.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:20px">✅</span>
+            <div>
+              <div style="font-weight:700;color:${mode==='add'?'#065f46':mode==='del'?'#991b1b':'#1e40af'}">${stu.name}</div>
+              <div style="font-size:11px;color:#6b7280">Class ${stu.class} · Sec ${stu.section} · Roll ${stu.roll}</div>
+            </div>
+          </div>`;
+    } else {
+        // Student NOT found ⚠️ — show name input to add
+        preview.style.borderColor = '#f59e0b';
+        preview.innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:18px">⚠️</span>
+            <div style="font-size:12px;color:#92400e;font-weight:600">
+              Roll ${roll} (Class ${cls} Sec ${sec}) database-এ নেই।<br>
+              <span style="font-weight:400">নাম লিখুন — seating-এ add হওয়ার সাথে student-ও save হবে।</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="sp-new-stu-name" type="text" placeholder="Student-এর পুরো নাম লিখুন *"
+              style="flex:1;padding:8px 12px;border:1.5px solid #fbbf24;border-radius:8px;
+                     font-size:13px;font-family:inherit;outline:none;background:#fffbeb"
+              oninput="this.style.borderColor=this.value.trim()?'#10b981':'#fbbf24'">
+            <span style="font-size:11px;color:#92400e;white-space:nowrap">বাধ্যতামূলক</span>
+          </div>`;
+    }
+}
+
 async function spEditLoadPlan() {
     const planId = document.getElementById('sp-edit-plan').value;
     if(!planId) return;
@@ -3154,6 +3239,10 @@ async function spFindCurrentRoom() {
     const cls    = document.getElementById('sp-move-class').value;
     const sec    = document.getElementById('sp-move-sec').value;
     const roll   = parseInt(document.getElementById('sp-move-roll').value);
+
+    // Show name preview
+    spLookupStudent('move');
+
     if(!planId||!cls||!roll) return;
 
     const plans = await DB.get('seatingPlans');
@@ -3187,54 +3276,90 @@ async function spAddStudentToRoom() {
     const room   = document.getElementById('sp-add-room').value;
     if(!planId||!roll||!cls||!room){showAlert('Plan, Roll, Class ও Room সব দিন।','error');return;}
 
+    // Check if new student name was entered
+    const newNameInput = document.getElementById('sp-new-stu-name');
+    const newName = newNameInput?.value?.trim()?.toUpperCase();
+
+    // If name input is visible but empty, show error
+    if(newNameInput && newNameInput.offsetParent !== null && !newName) {
+        newNameInput.style.borderColor='#ef4444';
+        newNameInput.focus();
+        showAlert('Student-এর নাম লিখুন।','error');
+        return;
+    }
+
     const plans = await DB.get('seatingPlans');
     const p = plans.find(x=>x.id===planId);
     if(!p){showAlert('Plan not found.','error');return;}
 
     const gender = sec==='A'?'BOYS':'GIRLS';
 
-    // Check if already exists
     const parseRolls = (s)=>{if(!s)return[];const r=[];s.split(',').forEach(seg=>{seg=seg.trim().replace(/[–—]/g,'-');if(seg.includes('-')){const[a,b]=seg.split('-').map(x=>parseInt(x.trim()));if(!isNaN(a)&&!isNaN(b))for(let i=a;i<=b;i++)r.push(i);}else{const n=parseInt(seg);if(!isNaN(n))r.push(n);}});return r;};
 
     const existing = (p.plan||[]).find(r=>r.class===cls&&r.section===sec&&parseRolls(r.rolls).includes(roll));
     if(existing){showAlert(`Roll ${roll} ইতিমধ্যে ${existing.roomName}-এ আছে।`,'warning');return;}
 
-    // Find matching entry in plan (same room+class+section+half) or create new
     let entry = (p.plan||[]).find(r=>r.roomName===room&&r.class===cls&&r.section===sec&&(r.half===half||r.half===(half.includes('2nd')?'2H':'1H')));
 
     if(entry){
-        // Add roll to existing entry's rolls string
         const existing_rolls = parseRolls(entry.rolls);
         existing_rolls.push(roll);
         existing_rolls.sort((a,b)=>a-b);
-        // Rebuild compact rolls string
         const segs=[];let i=0;
         const arr=existing_rolls;
         while(i<arr.length){let j=i;while(j+1<arr.length&&arr[j+1]===arr[j]+1)j++;segs.push(j>i?`${arr[i]}–${arr[j]}`:String(arr[i]));i=j+1;}
         entry.rolls = segs.join(', ');
         entry.assigned = (entry.assigned||0)+1;
     } else {
-        // Create new entry
         p.plan.push({roomName:room,gender,half,class:cls,section:sec,assigned:1,capacity:0,vacant:0,rolls:String(roll)});
     }
 
-    const updatedPlans = plans.map(x=>x.id===planId?p:x);
-    await DB.set('seatingPlans', updatedPlans);
+    await DB.set('seatingPlans', plans.map(x=>x.id===planId?p:x));
     DB.invalidate('seatingPlans');
 
-    // Also add to students if not exists
+    // Save student to database
     const students = await DB.get('students');
-    if(!students.find(s=>s.class===cls&&s.section===sec&&parseInt(s.roll)===roll)){
-        students.push({id:`stu_${cls}_${sec}_${roll}`,roll,name:'New Student',class:cls,section:sec});
+    const existing_stu = students.find(s=>
+        (s.class===cls||s.classId===cls)&&s.section===sec&&(parseInt(s.roll)===roll||String(s.roll)===String(roll))
+    );
+
+    if(!existing_stu) {
+        // New student — save with name
+        const stuName = newName || `STUDENT ${cls}${sec}${roll}`;
+        students.push({
+            id: `stu_${cls}_${sec}_${roll}_${Date.now()}`,
+            roll, name: stuName, class: cls, section: sec,
+            gender: gender==='BOYS'?'Male':'Female',
+            createdAt: new Date().toISOString()
+        });
         await DB.set('students', students);
+        DB.invalidate('students');
+        showAlert(`✅ Roll ${roll} "${stuName}" added to ${room} and saved!`, 'success');
+    } else if(newName && existing_stu.name !== newName) {
+        // Update name if changed
+        existing_stu.name = newName;
+        await DB.set('students', students);
+        DB.invalidate('students');
+        showAlert(`✅ Roll ${roll} "${newName}" added to ${room}!`, 'success');
+    } else {
+        showAlert(`✅ Roll ${roll} (${existing_stu.name||''}) added to ${room}!`, 'success');
     }
 
-    showAlert(`✅ Roll ${roll} (Class ${cls}-${sec}) added to ${room}!`,'success');
     const statusEl = document.getElementById('sp-edit-status');
-    if(statusEl) statusEl.innerHTML = `<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;font-size:13px;color:#065f46;margin-top:8px">
-        ✅ Roll <strong>${roll}</strong> (Class ${cls}-${sec}) → Room <strong>${room}</strong> (${half}) যোগ করা হয়েছে।
-    </div>`;
+    const finalName = newName || existing_stu?.name || `Roll ${roll}`;
+    if(statusEl) statusEl.innerHTML = `
+      <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;font-size:13px;color:#065f46;margin-top:10px;display:flex;gap:10px;align-items:center">
+        <span style="font-size:20px">✅</span>
+        <div>
+          <strong>${finalName}</strong> (Roll ${roll}, Class ${cls}-${sec})<br>
+          <span style="font-size:11px">→ Room <strong>${room}</strong> (${half}) যোগ করা হয়েছে।</span>
+        </div>
+      </div>`;
+
+    // Reset form
     document.getElementById('sp-add-roll').value = '';
+    const preview = document.getElementById('sp-add-name-preview');
+    if(preview) preview.style.display='none';
 }
 
 async function spMoveStudent() {
