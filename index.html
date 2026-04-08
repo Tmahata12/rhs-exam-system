@@ -864,7 +864,29 @@ async function doLogin() {
 
     if (!role||!user||!pass) { showErr('Role, Username ও Password সব দিন।'); return; }
     hideErr();
-    setBtn('⏳ Connecting...', true);
+
+    // ⚡ INSTANT LOGIN: যদি আগের session-এর cached data থাকে
+    // এবং local credentials মিলে যায় — সাথে সাথে login দাও
+    const defaults = {
+        admin:  {p:'admin123',  n:'AHM RHS'},
+        teacher:{p:'teacher123',n:'Sample Teacher'},
+        office: {p:'office123', n:'Office Staff'}
+    };
+    const hasCache = localStorage.getItem('_c_students') || localStorage.getItem('_c_exams');
+    const savedToken = localStorage.getItem(JWT_KEY);
+
+    if(hasCache && defaults[user] && defaults[user].p===pass) {
+        // Cache আছে + credentials ঠিক → instant login, background-এ sync
+        setBtn('✅ Done!');
+        setTimeout(()=>startApp(defaults[user].n, role, false), 150);
+        return;
+    }
+    if(hasCache && savedToken) {
+        // Token আছে — instantly login, background verify করবে
+        setBtn('⏳ Verifying...', true);
+    } else {
+        setBtn('⏳ Connecting...', true);
+    }
 
     // Fast fetch with short timeout for login
     const quickFetch = (url, opts={}, ms=6000) =>
@@ -946,61 +968,117 @@ function startApp(name, role, synced) {
     const app = document.getElementById('appWrap');
     app.style.display = 'flex';
     document.getElementById('headerUser').textContent = name;
-    document.getElementById('syncBadge').className = 'sync-badge '+(synced?'sync-ok':'sync-fail');
-    document.getElementById('syncBadge').innerHTML = synced ? '☁️ Cloud Sync ✓' : '💾 Connecting...';
-    document.getElementById('syncBadge').style.cursor = 'pointer';
-    document.getElementById('syncBadge').onclick = () => {
-        const badge = document.getElementById('syncBadge');
-        if(badge) { badge.innerHTML='⏳ Connecting...'; badge.className='sync-badge sync-fail'; }
-        checkSync();
-    };
 
-    // Load dashboard immediately
+    // Setup sync badge
+    const badge = document.getElementById('syncBadge');
+    if(badge) {
+        badge.style.cursor = 'pointer';
+        badge.onclick = () => { checkSync(); };
+    }
+
+    // Load dashboard IMMEDIATELY from cache — don't wait for server
     showPage('dashboard');
     restoreSidebarState();
 
-    // Preload all collections — retry up to 3 times if backend sleeping
-    const tryPreload = async (attempt=1) => {
-        const badge = document.getElementById('syncBadge');
-        if(badge) {
-            badge.className = 'sync-badge sync-fail';
-            badge.innerHTML = attempt===1 ? '⏳ Connecting...' : `⏳ Retry ${attempt}/3...`;
-        }
-        // Show status on dashboard
+    // Check if we have local cache data
+    const hasCache = localStorage.getItem('_c_students') || localStorage.getItem('_c_exams');
+
+    if(hasCache) {
+        // ✅ Cache আছে — সাথে সাথে দেখাবে
+        if(badge){ badge.className='sync-badge sync-ok'; badge.innerHTML='✅ Local Data'; }
+        // Background-এ silently sync করো
+        silentSync();
+    } else {
+        // ❌ Cache নেই — server থেকে নিতেই হবে
         const statusDiv = document.getElementById('db-load-status');
         if(statusDiv) statusDiv.innerHTML = `
-          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:10px;font-size:13px;color:#1e40af">
-            <span style="font-size:18px">⏳</span>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:12px;font-size:13px;color:#1e40af;margin-bottom:4px">
+            <div style="font-size:24px;animation:spin 1.5s linear infinite">⟳</div>
             <div>
-              <strong>Server connecting... (attempt ${attempt}/3)</strong><br>
-              <span style="font-size:11px;color:#3b82f6">Render.com backend জাগছে — 20-30 সেকেন্ড লাগবে। অপেক্ষা করুন...</span>
+              <strong style="font-size:14px">প্রথমবার sync হচ্ছে...</strong><br>
+              <span style="font-size:12px;color:#3b82f6">Render.com server জাগছে — একটু অপেক্ষা করুন (30-60 sec)।
+              পরের বার এত সময় লাগবে না।</span>
             </div>
           </div>`;
-        try {
-            await DB.preloadAll();
-            if(badge){ badge.className='sync-badge sync-ok'; badge.innerHTML='☁️ Cloud Sync ✓'; }
-            if(statusDiv) statusDiv.innerHTML = '';
-            // Refresh current page with new data
-            const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','') || 'dashboard';
-            showPage(curPage);
-        } catch(e) {
-            if(attempt < 3) {
-                if(statusDiv) statusDiv.innerHTML = `
-                  <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;font-size:13px;color:#92400e">
-                    ⚠️ Attempt ${attempt} failed — retrying in 8 seconds... (${e.message||'timeout'})
-                  </div>`;
-                setTimeout(()=>tryPreload(attempt+1), 8000);
-            } else {
-                if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='💾 Retry ↺'; }
-                if(statusDiv) statusDiv.innerHTML = `
-                  <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;font-size:13px;color:#991b1b">
-                    ❌ Server unreachable after 3 attempts. Data may be stale.<br>
-                    <button class="btn btn-primary btn-sm" onclick="checkSync()" style="margin-top:8px">🔄 Try Again</button>
-                  </div>`;
-            }
-        }
-    };
-    setTimeout(()=>tryPreload(), 500);
+        if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='⏳ Loading...'; }
+        tryPreloadWithRetry(1);
+    }
+}
+
+// Silent background sync — user কিছু দেখে না, শুধু data update হয়
+async function silentSync() {
+    const badge = document.getElementById('syncBadge');
+    try {
+        // Quick server check — 5 seconds max
+        const r = await fetch(API_BASE+'/api/exams', {signal:AbortSignal.timeout(5000)});
+        if(!r.ok) throw new Error();
+        // Server alive — full sync in background
+        if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='⏳ Syncing...'; }
+        await DB.preloadAll();
+        if(badge){ badge.className='sync-badge sync-ok'; badge.innerHTML='☁️ Cloud Sync ✓'; }
+        // Quietly refresh current page data
+        const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','') || 'dashboard';
+        showPage(curPage);
+    } catch(e) {
+        // Server offline/sleeping — keep local data, show offline badge
+        if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='📴 Offline'; }
+        // Retry after 30 seconds silently
+        setTimeout(silentSync, 30000);
+    }
+}
+
+// First-time load — show progress to user
+async function tryPreloadWithRetry(attempt) {
+    const badge    = document.getElementById('syncBadge');
+    const statusDiv= document.getElementById('db-load-status');
+    const maxAttempts = 4;
+
+    if(attempt > maxAttempts) {
+        if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='💾 Retry ↺'; badge.onclick=()=>tryPreloadWithRetry(1); }
+        if(statusDiv) statusDiv.innerHTML = `
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:14px 18px;font-size:13px;color:#991b1b">
+            <strong>❌ Server connect করা যাচ্ছে না।</strong><br>
+            Internet connection check করুন অথবা কিছুক্ষণ পরে আবার try করুন।<br>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn btn-primary btn-sm" onclick="tryPreloadWithRetry(1)">🔄 Retry</button>
+              <button class="btn btn-secondary btn-sm" onclick="document.getElementById('db-load-status').innerHTML=''">✕ Dismiss</button>
+            </div>
+          </div>`;
+        return;
+    }
+
+    if(statusDiv) statusDiv.innerHTML = `
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 18px;font-size:13px;color:#065f46">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="font-size:20px;animation:spin 1.5s linear infinite">⟳</div>
+          <div>
+            <strong>Server connect হচ্ছে... (${attempt}/${maxAttempts})</strong><br>
+            <span style="font-size:11px">Render.com free server — প্রথমবার 30-60 sec লাগে।</span>
+          </div>
+        </div>
+        <div style="background:#e2e8f0;border-radius:99px;height:4px;margin-top:10px;overflow:hidden">
+          <div style="background:#059669;height:100%;width:${Math.round((attempt/maxAttempts)*100)}%;transition:width .5s;border-radius:99px"></div>
+        </div>
+      </div>`;
+
+    try {
+        await DB.preloadAll();
+        if(badge){ badge.className='sync-badge sync-ok'; badge.innerHTML='☁️ Cloud Sync ✓'; badge.onclick=()=>checkSync(); }
+        if(statusDiv) statusDiv.innerHTML = `
+          <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:10px 16px;font-size:13px;color:#065f46;display:flex;align-items:center;gap:8px">
+            ✅ <strong>সব data load হয়েছে!</strong>
+          </div>`;
+        setTimeout(()=>{ const sd=document.getElementById('db-load-status'); if(sd)sd.innerHTML=''; }, 2500);
+        const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','') || 'dashboard';
+        showPage(curPage);
+    } catch(e) {
+        const wait = attempt <= 2 ? 15000 : 25000;
+        if(statusDiv) statusDiv.innerHTML = `
+          <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;font-size:13px;color:#92400e">
+            ⚠️ Server এখনো জাগছে... ${Math.round(wait/1000)} সেকেন্ড পরে আবার try করবে।
+          </div>`;
+        setTimeout(()=>tryPreloadWithRetry(attempt+1), wait);
+    }
 }
 
 function hardReset() {
