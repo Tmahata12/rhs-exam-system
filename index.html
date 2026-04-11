@@ -7066,9 +7066,13 @@ async function printAtaGlance() {
     w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>At-a-Glance — ${date}</title>
     <style>*{margin:0;padding:0;box-sizing:border-box}
     @page{size:A4 landscape;margin:10mm}
-    @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.no-print{display:none}}</style>
+    .no-print{display:flex}
+      @media print{
+        .no-print{display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important}
+        *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+      }</style>
     </head><body>
-    <div class="no-print" style="padding:10px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;gap:10px">
+    <div class="no-print" style="padding:10px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;;gap:10px">
       <button onclick="window.print()" style="padding:8px 20px;background:#1B3A6B;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px">🖨️ Print</button>
       <button onclick="window.close()" style="padding:8px 20px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px">✕ Close</button>
     </div>
@@ -9522,10 +9526,14 @@ function mfPrint() {
       *{margin:0;padding:0;box-sizing:border-box}
       body{font-family:'Times New Roman',serif}
       @page{size:A4;margin:10mm}
-      @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.no-print{display:none}}
+      .no-print{display:flex}
+      @media print{
+        .no-print{display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important}
+        *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+      }
     </style>
     </head><body>
-    <div class="no-print" style="padding:8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;gap:8px">
+    <div class="no-print" style="padding:8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;gap:8px">
       <button onclick="window.print()" style="padding:7px 18px;background:#1B3A6B;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">🖨️ Print</button>
       <button onclick="window.close()" style="padding:7px 18px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">✕ Close</button>
     </div>
@@ -9557,10 +9565,14 @@ async function mfPrintAll() {
       *{margin:0;padding:0;box-sizing:border-box}
       body{font-family:'Times New Roman',serif}
       @page{size:A4;margin:10mm}
-      @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.no-print{display:none}}
+      .no-print{display:flex}
+      @media print{
+        .no-print{display:none!important;visibility:hidden!important;height:0!important;overflow:hidden!important}
+        *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+      }
     </style>
     </head><body>
-    <div class="no-print" style="padding:8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;gap:8px">
+    <div class="no-print" style="padding:8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;gap:8px">
       <button onclick="window.print()" style="padding:7px 18px;background:#1B3A6B;color:white;border:none;border-radius:6px;cursor:pointer">🖨️ Print All (${subjects.length} subjects)</button>
       <button onclick="window.close()" style="padding:7px 18px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer">✕ Close</button>
     </div>
