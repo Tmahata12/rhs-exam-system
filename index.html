@@ -4223,10 +4223,35 @@ async function importRosterXLSX(event) {
 
 // ── STUDENTS ──────────────────────────────────────────────────────────────────
 async function renderStudents(el) {
-    const [students, exams] = await Promise.all([DB.get('students'), DB.get('exams')]);
+    let students = await DB.get('students');
+    const exams  = await DB.get('exams');
+
+    // Sort by class order, section, then roll number
+    const clsOrder = ['V','VI','VII','VIII','IX','X'];
+    students = students.sort((a,b)=>{
+        const ac = a.class||a.classId||''; const bc = b.class||b.classId||'';
+        const ci = (clsOrder.indexOf(ac)-clsOrder.indexOf(bc));
+        if(ci!==0) return ci;
+        const si = (a.section||'').localeCompare(b.section||'');
+        if(si!==0) return si;
+        return (parseInt(a.roll)||0)-(parseInt(b.roll)||0);
+    });
+
+    // Check duplicates
+    const seen = new Set();
+    let dupCount = 0;
+    students.forEach(s=>{
+        const key = `${s.class||s.classId}-${s.section}-${s.roll}`;
+        if(seen.has(key)) dupCount++;
+        else seen.add(key);
+    });
     const classOpts = ['V','VI','VII','VIII','IX','X'].map(c=>`<option value="${c}">Class ${c}</option>`).join('');
     el.innerHTML = `
     <div class="page-title">👨‍🎓 Student Management</div>
+    ${dupCount>0?`<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:10px 16px;margin:0 24px 12px;font-size:13px;color:#92400e;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <span>⚠️ <strong>${dupCount} duplicate student</strong> পাওয়া গেছে। Total ${students.length} → আসল ${students.length-dupCount} হওয়ার কথা।</span>
+      <button class="btn btn-warning btn-sm" onclick="removeDuplicateStudents()" style="white-space:nowrap">🧹 Remove Duplicates</button>
+    </div>`:''}
     <div style="padding:0 24px 24px">
     <div style="display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start">
 
@@ -4351,6 +4376,37 @@ async function renderStudents(el) {
     </div>
     </div></div>`;
     window._allStudents = students;
+}
+
+async function removeDuplicateStudents() {
+    if(!confirm('Duplicate students remove করবেন? (same class+section+roll — প্রথমটা রাখবে)')) return;
+    const students = await DB.get('students');
+    const seen = new Map();
+    const deduped = [];
+    let removed = 0;
+
+    // Sort first — proper students (with real names) প্রথমে রাখব
+    const sorted = [...students].sort((a,b)=>{
+        // Real name হলে priority বেশি
+        const aReal = a.name && a.name!=='New Student' && !a.name.startsWith('STUDENT ') ? 0 : 1;
+        const bReal = b.name && b.name!=='New Student' && !b.name.startsWith('STUDENT ') ? 0 : 1;
+        return aReal - bReal;
+    });
+
+    sorted.forEach(s=>{
+        const key = `${s.class||s.classId||''}-${s.section||''}-${s.roll}`;
+        if(!seen.has(key)){
+            seen.set(key, true);
+            deduped.push(s);
+        } else {
+            removed++;
+        }
+    });
+
+    await DB.set('students', deduped);
+    DB.invalidate('students');
+    showAlert(`✅ ${removed} duplicate remove হয়েছে। এখন ${deduped.length} students।`, 'success');
+    showPage('students');
 }
 
 function filterStudentsTable() {
