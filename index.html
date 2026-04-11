@@ -693,6 +693,9 @@ tbody tr:hover td { background:#eef3ff !important; }
       <div class="sidebar-item" onclick="showPage('answerscript')" id="nav-answerscript" data-label="Answer Script">
         <span class="icon">📦</span><span>Answer Script</span>
       </div>
+      <div class="sidebar-item" onclick="showPage('marksfoil')" id="nav-marksfoil" data-label="Marks Foil">
+        <span class="icon">📊</span><span>Marks Foil</span>
+      </div>
       <div class="sidebar-item" onclick="showPage('circular')" id="nav-circular" data-label="Circular">
         <span class="icon">📄</span><span>Circular / Notice</span>
       </div>
@@ -1341,6 +1344,7 @@ function showPage(page) {
         teachers:     renderTeachers,
         answerscript: renderAnswerScript,
         circular:     renderCircular,
+        marksfoil:    renderMarksFoil,
     };
     if (pages[page]) {
         content.innerHTML = `
@@ -9192,6 +9196,358 @@ async function renderAnswerScript(el) {
 // ══════════════════════════════════════════════════════════════════════════════
 // CIRCULAR / NOTICE
 // ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// MARKS FOIL — Auto generate from students
+// ══════════════════════════════════════════════════════════════════════════════
+async function renderMarksFoil(el) {
+    const [exams, students, settings] = await Promise.all([
+        DB.get('exams'), DB.get('students'), DB.getObj('settings')
+    ]);
+    const school = settings.schoolName || 'RAMNAGAR HIGH SCHOOL (H.S.)';
+
+    const SUBJECTS = {
+        'V':    ['Bengali','English','Mathematics','Poribesh o Porichoy'],
+        'VI':   ['Bengali','English','Mathematics','Poribesh o Porichoy','History','Geography'],
+        'VII':  ['Bengali','English','Mathematics','Poribesh o Porichoy','History','Geography','Sanskrit'],
+        'VIII': ['Bengali','English','Mathematics','Poribesh o Porichoy','History','Geography','Sanskrit'],
+        'IX':   ['Bengali','English','Mathematics','Physical Science','Life Science','History','Geography'],
+        'X':    ['Bengali','English','Mathematics','Physical Science','Life Science','History','Geography'],
+    };
+
+    // Exact marks per class per summative
+    const MARKS_CONFIG = {
+        'V':    { s1:20, s2:30, s3:50, total:100, hasPractical:false },
+        'VI':   { s1:30, s2:50, s3:70, total:150, hasPractical:false },
+        'VII':  { s1:30, s2:50, s3:70, total:150, hasPractical:false },
+        'VIII': { s1:30, s2:50, s3:70, total:150, hasPractical:false },
+        'IX':   { s1_wr:40, s1_pr:10, s1:50, s2_wr:40, s2_pr:10, s2:50, s3_wr:90, s3_pr:10, s3:100, total:200, hasPractical:true },
+        'X':    { s1_wr:40, s1_pr:10, s1:50, s2_wr:40, s2_pr:10, s2:50, s3_wr:90, s3_pr:10, s3:100, total:200, hasPractical:true },
+    };
+    const MARKS = { 'V':20, 'VI':30, 'VII':30, 'VIII':30, 'IX':40, 'X':40 };
+    const CLASSES = ['V','VI','VII','VIII','IX','X'];
+    const SECTIONS = ['A','B'];
+    const EXAMS_LIST = ['First Summative','Second Summative','Third Summative'];
+
+    const examOpts = exams.map(e=>`<option value="${e.id}">${e.name}${e.year?' ('+e.year+')':''}</option>`).join('');
+    const classOpts = CLASSES.map(c=>`<option value="${c}">Class ${c}</option>`).join('');
+
+    el.innerHTML = `
+    <div class="page-title">📊 Marks Foil Generator</div>
+    <div style="padding:0 24px 24px">
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">⚙️ Marks Foil তৈরি করুন</div>
+      <div class="form-row">
+        <div class="form-group"><label>Class *</label>
+          <select id="mf-class" onchange="mfLoadSubjects()">
+            <option value="">--Class--</option>${classOpts}
+          </select>
+        </div>
+        <div class="form-group"><label>Section *</label>
+          <select id="mf-section">
+            <option value="A">Section A (Boys)</option>
+            <option value="B">Section B (Girls)</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Subject *</label>
+          <select id="mf-subject">
+            <option value="">--Class select করুন--</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Exam Type</label>
+          <select id="mf-examtype">
+            <option value="summative">Summative (1st/2nd/3rd)</option>
+            <option value="single">Single Exam</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Academic Year</label>
+          <input id="mf-year" value="${settings.academicYear||'2025-26'}" placeholder="2025-26">
+        </div>
+        <div class="form-group"><label>Max Marks (প্রতি exam)</label>
+          <input id="mf-maxmarks" type="number" value="20" min="1" max="100">
+        </div>
+        <div class="form-group"><label>Prepared by</label>
+          <input id="mf-prepby" placeholder="Teacher name">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="btn btn-primary" onclick="mfPreview()">👁️ Preview</button>
+        <button class="btn btn-success" onclick="mfPrint()">🖨️ Print Marks Foil</button>
+        <button class="btn btn-warning" onclick="mfExportExcel()">📊 Export Excel</button>
+        <button class="btn btn-info btn-sm" onclick="mfPrintAll()">🖨️ All Subjects Print</button>
+      </div>
+    </div>
+
+    <!-- Preview area -->
+    <div id="mf-preview-area"></div>
+    </div>`;
+
+    // Store data globally
+    window._mf_students = students;
+    window._mf_subjects = SUBJECTS;
+    window._mf_marks    = MARKS;
+    window._mf_config   = MARKS_CONFIG;
+    window._mf_school   = school;
+    window._mf_settings = settings;
+
+    window.mfLoadSubjects = () => {
+        const cls  = document.getElementById('mf-class').value;
+        const subj = document.getElementById('mf-subject');
+        const maxm = document.getElementById('mf-maxmarks');
+        if(!cls){ subj.innerHTML='<option value="">--Class select করুন--</option>'; return; }
+        const subjects = SUBJECTS[cls]||[];
+        subj.innerHTML = subjects.map(s=>`<option value="${s}">${s}</option>`).join('');
+        const cfg = MARKS_CONFIG[cls];
+        if(maxm && cfg) maxm.value = cfg.s1_wr || cfg.s1 || 20;
+    };
+}
+
+function mfGetStudents() {
+    const cls  = document.getElementById('mf-class').value;
+    const sec  = document.getElementById('mf-section').value;
+    if(!cls) return [];
+    return (window._mf_students||[])
+        .filter(s=>(s.class===cls||s.classId===cls)&&s.section===sec)
+        .sort((a,b)=>parseInt(a.roll)-parseInt(b.roll));
+}
+
+function mfBuildHTML(cls, sec, subject, maxMarks, year, prepBy, forPrint=false) {
+    const students = (window._mf_students||[])
+        .filter(s=>(s.class===cls||s.classId===cls)&&s.section===sec)
+        .sort((a,b)=>parseInt(a.roll)-parseInt(b.roll));
+
+    const school   = window._mf_school || 'RAMNAGAR HIGH SCHOOL (H.S.)';
+    const settings = window._mf_settings||{};
+    const logo     = localStorage.getItem('rhs_school_logo')||'';
+    const cfg      = (window._mf_config||{})[cls] || {s1:20,s2:30,s3:50,total:100,hasPractical:false};
+    const hasPr    = cfg.hasPractical;
+    const fs       = forPrint ? '9.5pt' : '12px';
+    const ths      = forPrint ? '8.5pt' : '10px';
+
+    // Build header row and full-marks row based on class
+    let theadHTML = '';
+    let fullMarksRow = '';
+
+    if(hasPr) {
+        // IX, X — Wr + Pr per summative
+        theadHTML = `
+          <tr style="background:#1B3A6B;color:white">
+            <th rowspan="2" style="border:1px solid #aaa;padding:5px 4px;text-align:center;width:30px">Sl.</th>
+            <th rowspan="2" style="border:1px solid #aaa;padding:5px 4px;text-align:center;width:42px">Roll</th>
+            <th rowspan="2" style="border:1px solid #aaa;padding:5px 6px;text-align:left;min-width:140px">Name of Student</th>
+            <th colspan="3" style="border:1px solid #aaa;padding:4px;text-align:center">First Summative</th>
+            <th colspan="3" style="border:1px solid #aaa;padding:4px;text-align:center">Second Summative</th>
+            <th colspan="3" style="border:1px solid #aaa;padding:4px;text-align:center">Third Summative</th>
+            <th rowspan="2" style="border:1px solid #aaa;padding:4px;text-align:center;white-space:nowrap">G.Total<br><small>${cfg.total}</small></th>
+            <th rowspan="2" style="border:1px solid #aaa;padding:4px;text-align:center">Avg.</th>
+            <th rowspan="2" style="border:1px solid #aaa;padding:4px;text-align:center">Grade</th>
+          </tr>
+          <tr style="background:#2C4F8C;color:white;font-size:${ths}">
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Wr.<br>${cfg.s1_wr}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Pr.<br>${cfg.s1_pr}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Total<br>${cfg.s1}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Wr.<br>${cfg.s2_wr}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Pr.<br>${cfg.s2_pr}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Total<br>${cfg.s2}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Wr.<br>${cfg.s3_wr}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Pr.<br>${cfg.s3_pr}</th>
+            <th style="border:1px solid #aaa;padding:3px 4px;text-align:center">Total<br>${cfg.s3}</th>
+          </tr>`;
+    } else {
+        // V, VI, VII, VIII — simple
+        theadHTML = `
+          <tr style="background:#1B3A6B;color:white">
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center;width:30px">Sl.</th>
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center;width:42px">Roll</th>
+            <th style="border:1px solid #aaa;padding:5px 6px;text-align:left;min-width:140px">Name of Student</th>
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center">1st Sum.<br><small style="font-weight:400">${cfg.s1}</small></th>
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center">2nd Sum.<br><small style="font-weight:400">${cfg.s2}</small></th>
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center">3rd Sum.<br><small style="font-weight:400">${cfg.s3}</small></th>
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center">G.Total<br><small style="font-weight:400">${cfg.total}</small></th>
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center">Avg.<br><small style="font-weight:400">100</small></th>
+            <th style="border:1px solid #aaa;padding:5px 4px;text-align:center">Grade</th>
+          </tr>`;
+    }
+
+    // Build student rows
+    const emptyPr  = hasPr  ? `<td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td>` : `<td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td><td style="border:1px solid #ccc;padding:5px 4px"></td>`;
+
+    const tbodyHTML = students.map((s,i)=>`
+      <tr style="background:${i%2===0?'#fff':'#f8faff'}">
+        <td style="border:1px solid #ccc;padding:5px 4px;text-align:center;font-size:${fs}">${i+1}</td>
+        <td style="border:1px solid #ccc;padding:5px 4px;text-align:center;font-weight:700;color:#1B3A6B;font-size:${fs}">${s.roll}</td>
+        <td style="border:1px solid #ccc;padding:5px 6px;font-size:${fs}">${s.name||'—'}</td>
+        ${emptyPr}
+        <td style="border:1px solid #ccc;padding:5px 4px"></td>
+        <td style="border:1px solid #ccc;padding:5px 4px"></td>
+        <td style="border:1px solid #ccc;padding:5px 4px"></td>
+      </tr>`).join('');
+
+    return `
+    <div style="font-family:'Times New Roman',serif;padding:${forPrint?'0':'12px'}">
+      <div style="border:2px solid #1B3A6B;padding:8px 10px;margin-bottom:0">
+        <div style="display:flex;align-items:center;gap:12px">
+          ${logo?`<img src="${logo}" style="max-width:60px;max-height:60px;object-fit:contain;flex-shrink:0">`:''}
+          <div style="flex:1;text-align:center">
+            <div style="font-size:13pt;font-weight:700;color:#1B3A6B">${school}</div>
+            <div style="font-size:10pt;font-weight:700;color:#1B3A6B;margin-top:2px">
+              MARKS FOIL (Summative — ${year})
+            </div>
+          </div>
+          ${logo?`<div style="width:60px"></div>`:''}
+        </div>
+      </div>
+      <div style="border:1px solid #1B3A6B;border-top:none;padding:5px 10px;display:flex;gap:18px;flex-wrap:wrap;font-size:${fs}">
+        <span><strong>Class :</strong> ${cls}</span>
+        <span><strong>Sec :</strong> ${sec}</span>
+        <span><strong>Subject :</strong> ${subject}</span>
+        <span><strong>Total Marks :</strong> ${cfg.total}</span>
+        <span style="margin-left:auto"><strong>Prepared by :</strong> ${prepBy||'___________'}</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:${fs}">
+        <thead>${theadHTML}</thead>
+        <tbody>${tbodyHTML}</tbody>
+      </table>
+      <div style="display:flex;justify-content:space-between;margin-top:22px;font-size:${fs}">
+        <div style="text-align:center"><div style="border-top:1px solid #333;padding-top:3px;min-width:140px">Subject Teacher</div></div>
+        <div style="text-align:center"><div style="border-top:1px solid #333;padding-top:3px;min-width:140px">Class Teacher</div></div>
+        <div style="text-align:center"><div style="border-top:1px solid #333;padding-top:3px;min-width:140px">${settings.principalName||'Head of Institution'}</div></div>
+      </div>
+      <div style="margin-top:4px;font-size:8pt;color:#6b7280;text-align:right">Total Students: ${students.length}</div>
+    </div>`;
+}
+
+
+function mfPreview() {
+    const cls     = document.getElementById('mf-class').value;
+    const sec     = document.getElementById('mf-section').value;
+    const subject = document.getElementById('mf-subject').value;
+    const maxMarks= parseInt(document.getElementById('mf-maxmarks').value)||20;
+    const year    = document.getElementById('mf-year').value;
+    const prepBy  = document.getElementById('mf-prepby').value;
+
+    if(!cls||!subject){ showAlert('Class ও Subject select করুন।','error'); return; }
+
+    const students = mfGetStudents();
+    if(!students.length){ showAlert(`Class ${cls} Sec ${sec}-তে কোনো student নেই।`,'warning'); return; }
+
+    const html = mfBuildHTML(cls, sec, subject, maxMarks, year, prepBy, false);
+    const area = document.getElementById('mf-preview-area');
+    if(area) area.innerHTML = `
+      <div class="card" style="margin:0">
+        <div class="card-title">👁️ Preview — Class ${cls} Sec ${sec} — ${subject}
+          <span style="margin-left:auto;font-size:11px;color:var(--text-2)">${students.length} students</span>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">${html}</div>
+      </div>`;
+}
+
+function mfPrint() {
+    const cls     = document.getElementById('mf-class').value;
+    const sec     = document.getElementById('mf-section').value;
+    const subject = document.getElementById('mf-subject').value;
+    const maxMarks= parseInt(document.getElementById('mf-maxmarks').value)||20;
+    const year    = document.getElementById('mf-year').value;
+    const prepBy  = document.getElementById('mf-prepby').value;
+
+    if(!cls||!subject){ showAlert('Class ও Subject select করুন।','error'); return; }
+
+    const students = mfGetStudents();
+    if(!students.length){ showAlert(`Class ${cls} Sec ${sec}-তে কোনো student নেই।`,'warning'); return; }
+
+    const html = mfBuildHTML(cls, sec, subject, maxMarks, year, prepBy, true);
+    const w = window.open('','_blank','width=900,height=700');
+    if(!w){ showAlert('Popup blocked!','error'); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Marks Foil - Class ${cls} ${sec} - ${subject}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:'Times New Roman',serif}
+      @page{size:A4;margin:10mm}
+      @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.no-print{display:none}}
+    </style>
+    </head><body>
+    <div class="no-print" style="padding:8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;gap:8px">
+      <button onclick="window.print()" style="padding:7px 18px;background:#1B3A6B;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">🖨️ Print</button>
+      <button onclick="window.close()" style="padding:7px 18px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">✕ Close</button>
+    </div>
+    ${html}</body></html>`);
+    w.document.close();
+}
+
+async function mfPrintAll() {
+    const cls     = document.getElementById('mf-class').value;
+    const sec     = document.getElementById('mf-section').value;
+    const maxMarks= parseInt(document.getElementById('mf-maxmarks').value)||20;
+    const year    = document.getElementById('mf-year').value;
+    const prepBy  = document.getElementById('mf-prepby').value;
+    if(!cls){ showAlert('Class select করুন।','error'); return; }
+
+    const subjects = (window._mf_subjects||{})[cls]||[];
+    const students = mfGetStudents();
+    if(!students.length){ showAlert(`Class ${cls} Sec ${sec}-তে কোনো student নেই।`,'warning'); return; }
+
+    let allHTML = subjects.map(subj =>
+        `<div style="page-break-after:always">${mfBuildHTML(cls, sec, subj, maxMarks, year, prepBy, true)}</div>`
+    ).join('');
+
+    const w = window.open('','_blank','width=900,height=700');
+    if(!w){ showAlert('Popup blocked!','error'); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>All Marks Foils - Class ${cls} ${sec}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:'Times New Roman',serif}
+      @page{size:A4;margin:10mm}
+      @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.no-print{display:none}}
+    </style>
+    </head><body>
+    <div class="no-print" style="padding:8px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;gap:8px">
+      <button onclick="window.print()" style="padding:7px 18px;background:#1B3A6B;color:white;border:none;border-radius:6px;cursor:pointer">🖨️ Print All (${subjects.length} subjects)</button>
+      <button onclick="window.close()" style="padding:7px 18px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer">✕ Close</button>
+    </div>
+    ${allHTML}</body></html>`);
+    w.document.close();
+}
+
+function mfExportExcel() {
+    const cls     = document.getElementById('mf-class').value;
+    const sec     = document.getElementById('mf-section').value;
+    const subject = document.getElementById('mf-subject').value;
+    const maxMarks= parseInt(document.getElementById('mf-maxmarks').value)||20;
+    const year    = document.getElementById('mf-year').value;
+    if(!cls||!subject){ showAlert('Class ও Subject select করুন।','error'); return; }
+
+    const students = mfGetStudents();
+    if(!students.length){ showAlert('কোনো student নেই।','warning'); return; }
+
+    const examType = document.getElementById('mf-examtype').value;
+    const isMulti  = examType === 'summative';
+
+    const headers = isMulti
+        ? ['Sl','Roll','Name','1st Summative','2nd Summative','3rd Summative','Final','G.Total','Avg.','Grade']
+        : ['Sl','Roll','Name','Marks','Grade'];
+
+    const rows = [
+        [`MARKS FOIL (Summative - ${year})`, '', '', '', '', '', '', '', '', ''],
+        [`Class: ${cls}`, `Sec: ${sec}`, `Subject: ${subject}`, `Max Marks: ${maxMarks}`, '', '', '', '', '', ''],
+        headers,
+        ...students.map((s,i) => isMulti
+            ? [i+1, s.roll, s.name||'', '', '', '', '', '', '', '']
+            : [i+1, s.roll, s.name||'', '', '']
+        )
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{wch:4},{wch:6},{wch:28},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10},{wch:8},{wch:8}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Class${cls}${sec}_${subject.slice(0,10)}`);
+    XLSX.writeFile(wb, `MarksForil_${cls}${sec}_${subject}_${year}.xlsx`);
+    showAlert('✅ Excel exported!','success');
+}
+
 async function renderCircular(el) {
   const [exams, teachers, settings] = await Promise.all([
     DB.get('exams'), DB.get('teachers'), DB.getObj('settings')
