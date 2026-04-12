@@ -497,22 +497,45 @@ tbody tr:hover td { background:#eef3ff !important; }
 
 /* ── RESPONSIVE ── */
 @media(max-width:768px){
-  .sidebar { width:52px; }
+  .sidebar {
+    width:0;
+    overflow:hidden;
+    position:fixed;
+    top:var(--header-h);
+    bottom:32px;
+    left:0;
+    z-index:200;
+    transition:width .25s ease, box-shadow .25s;
+    box-shadow:none;
+  }
+  .sidebar.mobile-open {
+    width:230px;
+    overflow-y:auto;
+    box-shadow:4px 0 28px rgba(0,0,0,0.22);
+  }
+  .sidebar.mobile-open .sidebar-item span:last-child { display:inline !important; }
+  .sidebar.mobile-open .sidebar-section { display:block !important; opacity:1 !important; height:auto !important; }
+  .sidebar.collapsed { width:0; }
   .sidebar-item span:not(.icon) { display:none; }
   .sidebar-section { display:none; }
   .main-content { padding:10px; }
   .stats-row { grid-template-columns:1fr 1fr; }
-  /* Dashboard grids → single column on mobile */
   [style*="grid-template-columns:1fr 1fr"] { grid-template-columns:1fr !important; }
   [style*="repeat(auto-fill,minmax(150px"] { grid-template-columns:repeat(3,1fr) !important; }
-  /* Smaller header title */
   .app-header h1 { font-size:12px; }
   .header-search { min-width:100px; max-width:180px; }
-  /* Quick actions 2 col */
   [style*="grid-template-columns:1fr 1fr;gap:6px"] { grid-template-columns:1fr 1fr !important; }
-  /* Footer compact */
   .app-footer span:first-child { display:none; }
 }
+#sidebar-backdrop {
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.38);
+  z-index:199;
+}
+#sidebar-backdrop.show { display:block; }
+
 @media(max-width:480px){
   [style*="repeat(auto-fill,minmax(150px"] { grid-template-columns:1fr 1fr !important; }
   .db-stat-card { padding:10px 12px; }
@@ -613,6 +636,8 @@ tbody tr:hover td { background:#eef3ff !important; }
   </div>
 
   <div class="app-body">
+    <!-- Mobile sidebar backdrop -->
+    <div id="sidebar-backdrop" onclick="toggleSidebar()"></div>
     <!-- Sidebar -->
     <div class="sidebar" id="mainSidebar">
       <div class="sidebar-section">Exam</div>
@@ -8028,23 +8053,61 @@ function printPreview(html, title='Print') {
 
 // ── DARK MODE ────────────────────────────────────────────────────────────────
 function toggleSidebar() {
-    const sb  = document.getElementById('mainSidebar');
-    const btn = document.getElementById('sidebarToggleBtn');
+    const sb       = document.getElementById('mainSidebar');
+    const btn      = document.getElementById('sidebarToggleBtn');
+    const backdrop = document.getElementById('sidebar-backdrop');
     if(!sb) return;
-    const collapsed = sb.classList.toggle('collapsed');
-    if(btn) btn.textContent = collapsed ? '▶' : '☰';
-    // Persist state
-    localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0');
+
+    const isMobile = window.innerWidth <= 768;
+
+    if(isMobile) {
+        // Mobile: overlay drawer
+        const isOpen = sb.classList.toggle('mobile-open');
+        if(backdrop) backdrop.classList.toggle('show', isOpen);
+        if(btn) btn.textContent = isOpen ? '✕' : '☰';
+    } else {
+        // Desktop: collapse/expand
+        sb.classList.remove('mobile-open');
+        if(backdrop) backdrop.classList.remove('show');
+        const collapsed = sb.classList.toggle('collapsed');
+        if(btn) btn.textContent = collapsed ? '▶' : '☰';
+        localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0');
+    }
 }
 
 // Restore sidebar state on load
 function restoreSidebarState() {
-    if(localStorage.getItem('sidebar_collapsed') === '1') {
+    const isMobile = window.innerWidth <= 768;
+    if(!isMobile && localStorage.getItem('sidebar_collapsed') === '1') {
         const sb  = document.getElementById('mainSidebar');
         const btn = document.getElementById('sidebarToggleBtn');
         if(sb)  sb.classList.add('collapsed');
         if(btn) btn.textContent = '▶';
     }
+    // Close sidebar on window resize to desktop
+    window.addEventListener('resize', ()=>{
+        if(window.innerWidth > 768) {
+            const sb = document.getElementById('mainSidebar');
+            const bd = document.getElementById('sidebar-backdrop');
+            const btn= document.getElementById('sidebarToggleBtn');
+            if(sb)  { sb.classList.remove('mobile-open'); }
+            if(bd)  { bd.classList.remove('show'); }
+            if(btn) { btn.textContent = sb?.classList.contains('collapsed') ? '▶' : '☰'; }
+        }
+    });
+    // Close sidebar when page changes on mobile
+    document.addEventListener('click', e=>{
+        if(window.innerWidth > 768) return;
+        const sb = document.getElementById('mainSidebar');
+        if(!sb) return;
+        if(e.target.closest('.sidebar-item')) {
+            sb.classList.remove('mobile-open');
+            const bd = document.getElementById('sidebar-backdrop');
+            if(bd) bd.classList.remove('show');
+            const btn = document.getElementById('sidebarToggleBtn');
+            if(btn) btn.textContent = '☰';
+        }
+    });
 }
 
 function toggleDark() {
@@ -15242,15 +15305,55 @@ function edPrintAll() {
 
 <!-- PWA Service Worker Registration -->
 <script>
+// Fix manifest — inject via Blob URL (Chrome mobile requires this)
+(function() {
+    const iconSvg = `<svg width="192" height="192" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
+      <rect width="192" height="192" rx="40" fill="#0f172a"/>
+      <circle cx="96" cy="96" r="78" fill="none" stroke="#f97316" stroke-width="6"/>
+      <circle cx="96" cy="96" r="62" fill="none" stroke="#f97316" stroke-width="2" opacity=".4"/>
+      <path d="M50 80 L96 68 L142 80 L142 120 L96 108 L50 120 Z" fill="#1e3a8a"/>
+      <path d="M96 68 L96 108" stroke="#f97316" stroke-width="3"/>
+      <path d="M50 80 L96 68 L96 108 L50 120 Z" fill="#1d4ed8"/>
+      <path d="M96 68 L142 80 L142 120 L96 108 Z" fill="#2563eb"/>
+      <path d="M96 42 C96 42 84 54 84 63 C84 72 90 75 96 73 C102 75 108 72 108 63 C108 54 96 42 96 42Z" fill="#f97316"/>
+      <path d="M96 50 C96 50 88 58 88 65 C88 70 92 72 96 71 C100 72 104 70 104 65 C104 58 96 50 96 50Z" fill="#fbbf24"/>
+      <text x="96" y="152" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#f97316" letter-spacing="2">RHS EMS</text>
+    </svg>`;
+    const iconUrl = 'data:image/svg+xml;base64,' + btoa(iconSvg);
+
+    const manifest = {
+        name: "RHS Exam Management System",
+        short_name: "RHS EMS",
+        description: "Ramnagar High School Exam Management",
+        start_url: "./",
+        display: "standalone",
+        background_color: "#0f172a",
+        theme_color: "#f97316",
+        orientation: "portrait-primary",
+        icons: [
+            { src: iconUrl, sizes: "192x192", type: "image/svg+xml", purpose: "any maskable" },
+            { src: iconUrl, sizes: "512x512", type: "image/svg+xml", purpose: "any" }
+        ]
+    };
+
+    // Remove old manifest link
+    document.querySelectorAll('link[rel="manifest"]').forEach(l => l.remove());
+
+    // Inject via Blob URL
+    const blob = new Blob([JSON.stringify(manifest)], {type: 'application/manifest+json'});
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement('link');
+    link.rel   = 'manifest';
+    link.href  = url;
+    document.head.appendChild(link);
+})();
+
+// Service Worker
 if('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         const swCode = `
-const CACHE = 'rhs-ems-v1';
-const ASSETS = ['/'];
-self.addEventListener('install', e => {
-    e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
-    self.skipWaiting();
-});
+const CACHE = 'rhs-ems-v2';
+self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => {
     e.waitUntil(caches.keys().then(keys =>
         Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))
@@ -15259,16 +15362,16 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
     if(e.request.method !== 'GET') return;
-    if(e.request.url.includes('onrender.com')) return;
-    e.respondWith(
-        fetch(e.request).catch(() => caches.match(e.request))
-    );
+    if(e.request.url.includes('onrender.com') || e.request.url.includes('mongodb')) return;
+    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
 });`;
-        const blob = new Blob([swCode], {type:'application/javascript'});
-        const swUrl = URL.createObjectURL(blob);
-        navigator.serviceWorker.register(swUrl)
-            .then(()=> console.log('SW registered'))
-            .catch(()=>{});
+        try {
+            const blob  = new Blob([swCode], {type:'application/javascript'});
+            const swUrl = URL.createObjectURL(blob);
+            navigator.serviceWorker.register(swUrl)
+                .then(()=> console.log('SW registered'))
+                .catch(e => console.log('SW error:', e));
+        } catch(e) {}
     });
 }
 
@@ -15277,7 +15380,6 @@ let deferredPrompt;
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPrompt = e;
-    // Show install button in header after login
     setTimeout(() => {
         const headerRight = document.querySelector('.header-right');
         if(headerRight && !document.getElementById('pwa-install-btn')) {
