@@ -743,7 +743,7 @@ tbody tr:hover td { background:#eef3ff !important; }
   <!-- Footer -->
   <div class="app-footer">
     <span class="ft-school">🏫 Ramnagar High School (H.S.)</span>
-    <span class="ft-credit">Designed &amp; Developed by <strong>TSM</strong> &nbsp;·&nbsp; v20262.1</span>
+    <span class="ft-credit">Designed &amp; Developed by <strong>TSM</strong> &nbsp;·&nbsp; v2026.1</span>
     <span class="ft-time" id="footer-time"></span>
   </div>
 </div>
@@ -1067,11 +1067,9 @@ function startApp(name, role, synced) {
 async function silentSync() {
     const badge = document.getElementById('syncBadge');
     try {
-        // Quick server check — 12 seconds max (backend wakeup নিতে পারে)
-        const r = await fetch(API_BASE+'/api/exams', {signal:AbortSignal.timeout(12000)});
-        // 401/403/404 মানেও server জেগে আছে — শুধু network error = offline
-        const serverAlive = r.ok || r.status===401 || r.status===403 || r.status===404 || r.status===200;
-        if(!serverAlive) throw new Error('HTTP '+r.status);
+        // Use /api/health — no auth required, just checks server is alive
+        const r = await fetch(API_BASE+'/api/health', {signal:AbortSignal.timeout(12000)});
+        if(!r.ok) throw new Error('Server down');
 
         // Server alive — full sync
         if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='⏳ Syncing...'; }
@@ -13190,8 +13188,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
     // ── Keep-alive ping every 4 min to prevent Render.com sleep ──
     const BACKEND = 'https://rhs-prms-backend.onrender.com';
     const ping = () => {
-        fetch(`${BACKEND}/api/exams`, {method:'GET', signal:AbortSignal.timeout(8000)})
-            .then(r=>{ if(r.ok||r.status===401||r.status===404){ const b=document.getElementById('syncBadge'); if(b&&b.classList.contains('sync-fail')){b.className='sync-badge sync-ok';b.innerHTML='☁️ Cloud Sync ✓';} } })
+        // /api/health does not require auth — no 401 errors
+        fetch(`${BACKEND}/api/health`, {method:'GET', signal:AbortSignal.timeout(8000)})
+            .then(r=>{ if(r.ok){ const b=document.getElementById('syncBadge'); if(b&&b.classList.contains('sync-fail')){b.className='sync-badge sync-ok';b.innerHTML='☁️ Cloud Sync ✓';} } })
             .catch(()=>{});
     };
     // Wake up backend immediately, then keep alive every 4 min
