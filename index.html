@@ -763,10 +763,42 @@ async function apiFetch(ep, method='GET', body=null) {
     if (body)  opts.body = JSON.stringify(body);
     const r = await fetch(API_BASE+ep, { ...opts, signal:AbortSignal.timeout(12000) });
     if (r.status===401) {
+        // Token expired — try re-login silently
+        const saved = localStorage.getItem('ems_saved_pass');
+        const savedUser = localStorage.getItem('ems_saved_user');
+        if(saved && savedUser && !apiFetch._relogging) {
+            apiFetch._relogging = true;
+            try {
+                const lr = await fetch(API_BASE+'/api/auth/login', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({username: savedUser, password: saved, role:'admin', school:'rhs'})
+                });
+                if(lr.ok) {
+                    const ld = await lr.json();
+                    if(ld.token) {
+                        localStorage.setItem(JWT_KEY, ld.token);
+                        apiFetch._relogging = false;
+                        // Retry original request
+                        opts.headers['Authorization'] = 'Bearer '+ld.token;
+                        const r2 = await fetch(API_BASE+ep, {...opts, signal:AbortSignal.timeout(12000)});
+                        if(r2.ok) {
+                            const ct2 = r2.headers.get('content-type')||'';
+                            return ct2.includes('json') ? r2.json() : {};
+                        }
+                    }
+                }
+            } catch(e) {}
+            apiFetch._relogging = false;
+        }
         localStorage.removeItem(JWT_KEY);
+        // Show re-login badge
+        const badge = document.getElementById('syncBadge');
+        if(badge) { badge.className='sync-badge sync-fail'; badge.innerHTML='🔑 Re-login'; badge.onclick=()=>location.reload(); }
         throw new Error('UNAUTHORIZED');
     }
-    if (!r.ok) throw new Error('HTTP '+r.status);
+    if (!r.ok && r.status!==404) throw new Error('HTTP '+r.status);
+    if (r.status===404) return [];
     const ct = r.headers.get('content-type')||'';
     return ct.includes('json') ? r.json() : {};
 }
@@ -950,6 +982,9 @@ async function doLogin() {
                 const data = await r.json();
                 localStorage.setItem(JWT_KEY, data.token);
                 localStorage.removeItem('EMS_NO_AUTH');
+                // Save for auto re-login when token expires
+                localStorage.setItem('ems_saved_user', user);
+                localStorage.setItem('ems_saved_pass', pass);
                 setBtn('✅ Done!');
                 setTimeout(()=>startApp(data.user?.fullName||data.user?.username||user, role, true), 250);
                 return;
