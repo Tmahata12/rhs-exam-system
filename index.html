@@ -941,29 +941,7 @@ async function doLogin() {
 
     if (!role||!user||!pass) { showErr('Role, Username ও Password সব দিন।'); return; }
     hideErr();
-
-    // ⚡ INSTANT LOGIN: যদি আগের session-এর cached data থাকে
-    // এবং local credentials মিলে যায় — সাথে সাথে login দাও
-    const defaults = {
-        admin:  {p:'admin123',  n:'AHM RHS'},
-        teacher:{p:'teacher123',n:'Sample Teacher'},
-        office: {p:'office123', n:'Office Staff'}
-    };
-    const hasCache = localStorage.getItem('_c_students') || localStorage.getItem('_c_exams');
-    const savedToken = localStorage.getItem(JWT_KEY);
-
-    if(hasCache && defaults[user] && defaults[user].p===pass) {
-        // Cache আছে + credentials ঠিক → instant login, background-এ sync
-        setBtn('✅ Done!');
-        setTimeout(()=>startApp(defaults[user].n, role, false), 150);
-        return;
-    }
-    if(hasCache && savedToken) {
-        // Token আছে — instantly login, background verify করবে
-        setBtn('⏳ Verifying...', true);
-    } else {
-        setBtn('⏳ Connecting...', true);
-    }
+    setBtn('⏳ Connecting...', true);
 
     // Fast fetch with short timeout for login
     const quickFetch = (url, opts={}, ms=6000) =>
@@ -982,21 +960,19 @@ async function doLogin() {
                 const data = await r.json();
                 localStorage.setItem(JWT_KEY, data.token);
                 localStorage.removeItem('EMS_NO_AUTH');
-                // Save for auto re-login when token expires
                 localStorage.setItem('ems_saved_user', user);
                 localStorage.setItem('ems_saved_pass', pass);
                 setBtn('✅ Done!');
                 setTimeout(()=>startApp(data.user?.fullName||data.user?.username||user, role, true), 250);
                 return;
             }
-            // Auth returned error (wrong credentials)
             if(r.status===401||r.status===403) {
                 showErr('Username বা Password সঠিক নয়।');
                 setBtn('Sign In →', false);
                 return;
             }
         } catch(e) {
-            // Network error / timeout — try no-auth
+            // Network error / timeout — try offline mode
         }
 
         // Step 2: Check if backend reachable without auth (4 sec max)
@@ -1060,13 +1036,16 @@ function startApp(name, role, synced) {
     showPage('dashboard');
     restoreSidebarState();
 
-    // Check if we have local cache data
     const hasCache = localStorage.getItem('_c_students') || localStorage.getItem('_c_exams');
+    const hasToken = localStorage.getItem(JWT_KEY);
 
-    if(hasCache) {
-        // ✅ Cache আছে — সাথে সাথে দেখাবে
+    if(hasCache && hasToken) {
+        // ✅ Cache ও token আছে — সাথে সাথে দেখাবে
         if(badge){ badge.className='sync-badge sync-ok'; badge.innerHTML='✅ Local Data'; }
-        // Background-এ silently sync করো
+        silentSync();
+    } else if(hasCache && !hasToken) {
+        // Cache আছে কিন্তু token নেই — sync করতে হবে
+        if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='⏳ Syncing...'; }
         silentSync();
     } else {
         // ❌ Cache নেই — server থেকে নিতেই হবে
@@ -1076,8 +1055,7 @@ function startApp(name, role, synced) {
             <div style="font-size:24px;animation:spin 1.5s linear infinite">⟳</div>
             <div>
               <strong style="font-size:14px">প্রথমবার sync হচ্ছে...</strong><br>
-              <span style="font-size:12px;color:#3b82f6">Render.com server জাগছে — একটু অপেক্ষা করুন (30-60 sec)।
-              পরের বার এত সময় লাগবে না।</span>
+              <span style="font-size:12px;color:#3b82f6">Render.com server জাগছে — একটু অপেক্ষা করুন।</span>
             </div>
           </div>`;
         if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='⏳ Loading...'; }
