@@ -4447,42 +4447,37 @@ function filterStudentsTable() {
     const cls = document.getElementById('stuClassFilter')?.value||'';
     const sec = document.getElementById('stuSecFilter')?.value||'';
 
-    // If filtering, re-render from full list
     const allStu = window._allStudents||[];
-    if((q || cls || sec) && allStu.length) {
-        const filtered = allStu.filter(s=>{
+    const tbody  = document.getElementById('stuTbody');
+    if(!tbody) return;
+
+    const toShow = (q||cls||sec)
+        ? allStu.filter(s=>{
             const matchQ   = !q   || (s.name||'').toLowerCase().includes(q) || String(s.roll).includes(q);
             const matchCls = !cls || (s.class||s.classId||'')===cls;
             const matchSec = !sec || (s.section||'')===sec;
             return matchQ && matchCls && matchSec;
-        });
-        const tbody = document.getElementById('stuTbody');
-        if(tbody){
-            tbody.innerHTML = filtered.length ? filtered.map(s=>`
-              <tr data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
-                <td style="font-weight:600;color:var(--primary)">${s.roll}</td>
-                <td>${s.name}</td>
-                <td style="text-align:center"><span class="badge badge-blue">${s.class||s.classId||'—'}</span></td>
-                <td style="text-align:center">${s.section||'—'}</td>
-                <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${s.roll}')">🗑️</button></td>
-              </tr>`).join('') :
-              `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-2)">No students found</td></tr>`;
-        }
-        const cnt = document.getElementById('stu-count');
-        if(cnt) cnt.textContent = `${filtered.length} students`;
-        return;
+          })
+        : allStu;
+
+    if(q||cls||sec) {
+        // Re-render with correct buttons
+        tbody.innerHTML = toShow.length ? toShow.map(s=>`
+          <tr id="str-${s.id||s.roll}" data-id="${s.id||''}" data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
+            <td style="font-weight:700;color:var(--primary)">${s.roll}</td>
+            <td style="font-weight:500" id="sname-${s.id||s.roll}">${s.name||'—'}</td>
+            <td style="text-align:center"><span class="badge badge-blue">Cl.${s.class||s.classId||'?'}</span></td>
+            <td style="text-align:center"><span class="badge badge-${s.section==='A'?'blue':'purple'}">Sec ${s.section||'?'}</span></td>
+            <td style="display:flex;gap:4px">
+              <button class="btn btn-info btn-sm" title="Edit" onclick="editStudentInline('${s.id||s.roll}','${(s.name||'').replace(/'/g,"\\'")}')">✏️</button>
+              <button class="btn btn-danger btn-sm" title="Delete" onclick="deleteStudentItem('${s.id||s.roll}','${s.roll}','${s.class||s.classId||''}','${s.section||''}')">🗑️</button>
+            </td>
+          </tr>`).join('')
+        : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-2)">কোনো student পাওয়া যায়নি</td></tr>`;
     }
 
-    // No filter — show/hide existing rows
-    const rows = document.querySelectorAll('#stuTbody tr[data-roll]');
-    let visible = 0;
-    rows.forEach(r=>{
-        const show = true; // no filter active, show all loaded
-        r.style.display = show ? '' : 'none';
-        if(show) visible++;
-    });
     const cnt = document.getElementById('stu-count');
-    if(cnt) cnt.textContent = `${allStu.length} students`;
+    if(cnt) cnt.textContent = `${toShow.length} students`;
 }
 
 async function addStudentItem() {
