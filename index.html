@@ -1054,21 +1054,26 @@ function startApp(name, role, synced) {
 async function silentSync() {
     const badge = document.getElementById('syncBadge');
     try {
-        // Quick server check — 5 seconds max
-        const r = await fetch(API_BASE+'/api/exams', {signal:AbortSignal.timeout(5000)});
-        if(!r.ok) throw new Error();
-        // Server alive — full sync in background
+        // Quick server check — 12 seconds max (backend wakeup নিতে পারে)
+        const r = await fetch(API_BASE+'/api/exams', {signal:AbortSignal.timeout(12000)});
+        // 401/403/404 মানেও server জেগে আছে — শুধু network error = offline
+        const serverAlive = r.ok || r.status===401 || r.status===403 || r.status===404 || r.status===200;
+        if(!serverAlive) throw new Error('HTTP '+r.status);
+
+        // Server alive — full sync
         if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='⏳ Syncing...'; }
         await DB.preloadAll();
         if(badge){ badge.className='sync-badge sync-ok'; badge.innerHTML='☁️ Cloud Sync ✓'; }
-        // Quietly refresh current page data
+        // Quietly refresh current page
         const curPage = document.querySelector('.sidebar-item.active')?.id?.replace('nav-','') || 'dashboard';
         showPage(curPage);
     } catch(e) {
-        // Server offline/sleeping — keep local data, show offline badge
+        // আসল network error — server ঘুমিয়ে আছে
         if(badge){ badge.className='sync-badge sync-fail'; badge.innerHTML='📴 Offline'; }
-        // Retry after 30 seconds silently
-        setTimeout(silentSync, 30000);
+        // Click করলে retry
+        if(badge) badge.onclick = () => silentSync();
+        // 40 সেকেন্ড পরে auto retry
+        setTimeout(silentSync, 40000);
     }
 }
 
@@ -4379,16 +4384,19 @@ async function renderStudents(el) {
         <table><thead><tr>
           <th style="width:60px">Roll</th><th>Name</th>
           <th style="width:80px">Class</th><th style="width:70px">Sec</th>
-          <th style="width:50px">Action</th>
+          <th style="width:80px">Action</th>
         </tr></thead>
         <tbody id="stuTbody">
         ${students.length ? students.slice(0,200).map(s=>`
-          <tr data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
+          <tr id="str-${s.id||s.roll}" data-id="${s.id||''}" data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
             <td style="font-weight:700;color:var(--primary)">${s.roll}</td>
-            <td style="font-weight:500">${s.name||'—'}</td>
+            <td style="font-weight:500" id="sname-${s.id||s.roll}">${s.name||'—'}</td>
             <td style="text-align:center"><span class="badge badge-blue">Cl.${s.class||s.classId||'?'}</span></td>
             <td style="text-align:center"><span class="badge badge-${s.section==='A'?'blue':'purple'}">Sec ${s.section||'?'}</span></td>
-            <td><button class="btn btn-danger btn-sm" onclick="deleteStudentItem('${s.id||s.roll}')">🗑️</button></td>
+            <td style="display:flex;gap:4px">
+              <button class="btn btn-info btn-sm" title="Edit" onclick="editStudentInline('${s.id||s.roll}','${(s.name||'').replace(/'/g,"\\'")}')">✏️</button>
+              <button class="btn btn-danger btn-sm" title="Delete" onclick="deleteStudentItem('${s.id||s.roll}','${s.roll}','${s.class||s.classId||''}','${s.section||''}')">🗑️</button>
+            </td>
           </tr>`).join('')
         : `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-2)">
             কোনো student নেই। উপরের form থেকে add করুন বা Data Hub → Seed ALL করুন।
@@ -4548,12 +4556,92 @@ async function addStudentItem() {
     window._allStudents = students;
 }
 
-async function deleteStudentItem(roll) {
-    if(!window.confirm('Delete student roll: '+roll+'?')) return;
-    const students=(await DB.get('students')).filter(s=>s.roll!==roll);
-    await DB.set('students',students);
-    showAlert('Student deleted.','warning');
-    renderStudents(document.getElementById('mainContent'));
+async function deleteStudentItem(idOrRoll, roll, cls, sec) {
+    const msg = roll ? `Roll ${roll} (Class ${cls}-${sec}) delete করবেন?` : `Student delete করবেন?`;
+    if(!window.confirm(msg)) return;
+
+    const students = await DB.get('students');
+    // Match by id first, then fallback to roll+class+section
+    const filtered = students.filter(s => {
+        if(idOrRoll && s.id && s.id === idOrRoll) return false;
+        if(idOrRoll && String(s.roll) === String(idOrRoll) &&
+           (!cls || (s.class||s.classId||'')=== cls) &&
+           (!sec || s.section === sec)) return false;
+        return true;
+    });
+
+    if(filtered.length === students.length) {
+        showAlert('Student পাওয়া যায়নি!', 'error'); return;
+    }
+
+    await DB.set('students', filtered);
+    DB.invalidate('students');
+    showAlert(`✅ Student deleted. (${filtered.length} remaining)`, 'warning');
+
+    // Remove row from table directly — no full reload
+    const rowId = `str-${idOrRoll}`;
+    const row = document.getElementById(rowId);
+    if(row) {
+        row.style.background = '#fef2f2';
+        setTimeout(() => row.remove(), 300);
+    }
+    const cnt = document.getElementById('stu-count');
+    if(cnt) cnt.textContent = filtered.length + ' total';
+    window._allStudents = filtered;
+}
+
+function editStudentInline(idOrRoll, currentName) {
+    const nameCell = document.getElementById(`sname-${idOrRoll}`);
+    if(!nameCell) return;
+
+    // Already editing?
+    if(nameCell.querySelector('input')) return;
+
+    const oldName = currentName || nameCell.textContent;
+    nameCell.innerHTML = `
+      <div style="display:flex;gap:4px;align-items:center">
+        <input id="edit-inp-${idOrRoll}" value="${oldName}"
+          style="flex:1;padding:4px 8px;border:1.5px solid var(--primary);border-radius:6px;font-size:12px;font-family:inherit;min-width:0"
+          oninput="this.value=this.value.toUpperCase()"
+          onkeydown="if(event.key==='Enter')saveStudentEdit('${idOrRoll}');if(event.key==='Escape')cancelStudentEdit('${idOrRoll}','${oldName}')">
+        <button onclick="saveStudentEdit('${idOrRoll}')" style="padding:3px 8px;background:#059669;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;white-space:nowrap">✓ Save</button>
+        <button onclick="cancelStudentEdit('${idOrRoll}','${oldName}')" style="padding:3px 6px;background:#64748b;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px">✕</button>
+      </div>`;
+    document.getElementById(`edit-inp-${idOrRoll}`)?.focus();
+}
+
+function cancelStudentEdit(idOrRoll, oldName) {
+    const nameCell = document.getElementById(`sname-${idOrRoll}`);
+    if(nameCell) nameCell.innerHTML = `<span style="font-weight:500">${oldName}</span>`;
+}
+
+async function saveStudentEdit(idOrRoll) {
+    const inp = document.getElementById(`edit-inp-${idOrRoll}`);
+    const newName = inp?.value?.trim()?.toUpperCase();
+    if(!newName) { showAlert('নাম লিখুন।','error'); return; }
+
+    const students = await DB.get('students');
+    let found = false;
+    students.forEach(s => {
+        if(s.id === idOrRoll || String(s.roll) === String(idOrRoll)) {
+            s.name = newName;
+            found = true;
+        }
+    });
+
+    if(!found) { showAlert('Student পাওয়া যায়নি!','error'); return; }
+
+    await DB.set('students', students);
+    DB.invalidate('students');
+
+    const nameCell = document.getElementById(`sname-${idOrRoll}`);
+    if(nameCell) {
+        nameCell.innerHTML = `<span style="font-weight:500">${newName}</span>`;
+        nameCell.closest('tr').style.background = '#d1fae5';
+        setTimeout(()=>{ nameCell.closest('tr').style.background = ''; }, 1500);
+    }
+    window._allStudents = students;
+    showAlert(`✅ "${newName}" updated!`, 'success');
 }
 
 function downloadStudentXLSX() {
@@ -13007,6 +13095,30 @@ window.addEventListener('beforeunload', e=>{
     if(user) {
         e.preventDefault();
         e.returnValue='';
+    }
+});
+
+// Auto-sync when user comes back to the page (tab switch / phone unlock)
+let _lastSyncTime = 0;
+document.addEventListener('visibilitychange', () => {
+    if(document.hidden) return;
+    const user = sessionStorage.getItem('ems_user');
+    if(!user) return;
+    const now = Date.now();
+    // 10 মিনিটের বেশি হলে sync করো
+    if(now - _lastSyncTime > 10 * 60 * 1000) {
+        _lastSyncTime = now;
+        silentSync();
+    }
+});
+
+window.addEventListener('focus', () => {
+    const user = sessionStorage.getItem('ems_user');
+    if(!user) return;
+    const now = Date.now();
+    if(now - _lastSyncTime > 10 * 60 * 1000) {
+        _lastSyncTime = now;
+        silentSync();
     }
 });
 
