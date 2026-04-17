@@ -4389,12 +4389,12 @@ async function renderStudents(el) {
         <tbody id="stuTbody">
         ${students.length ? students.slice(0,200).map(s=>`
           <tr id="str-${s.id||s.roll}" data-id="${s.id||''}" data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
-            <td style="font-weight:700;color:var(--primary)">${s.roll}</td>
+            <td style="font-weight:700;color:var(--primary);cursor:pointer" id="sroll-${s.id||s.roll}" title="Click to edit roll" onclick="editRollInline('${s.id||s.roll}','${s.roll}')">${s.roll} <span style="font-size:9px;opacity:.5">✏️</span></td>
             <td style="font-weight:500" id="sname-${s.id||s.roll}">${s.name||'—'}</td>
             <td style="text-align:center"><span class="badge badge-blue">Cl.${s.class||s.classId||'?'}</span></td>
             <td style="text-align:center"><span class="badge badge-${s.section==='A'?'blue':'purple'}">Sec ${s.section||'?'}</span></td>
             <td style="display:flex;gap:4px">
-              <button class="btn btn-info btn-sm" title="Edit" onclick="editStudentInline('${s.id||s.roll}','${(s.name||'').replace(/'/g,"\\'")}')">✏️</button>
+              <button class="btn btn-info btn-sm" title="Edit" data-id="${s.id||s.roll}" data-name="${(s.name||'').replace(/"/g,'&quot;')}" data-cls="${s.class||s.classId||''}" data-sec="${s.section||''}" onclick="editStudentInline(this.dataset.id,this.dataset.name,this.dataset.cls,this.dataset.sec)">✏️</button>
               <button class="btn btn-danger btn-sm" title="Delete" onclick="deleteStudentItem('${s.id||s.roll}','${s.roll}','${s.class||s.classId||''}','${s.section||''}')">🗑️</button>
             </td>
           </tr>`).join('')
@@ -4464,12 +4464,12 @@ function filterStudentsTable() {
         // Re-render with correct buttons
         tbody.innerHTML = toShow.length ? toShow.map(s=>`
           <tr id="str-${s.id||s.roll}" data-id="${s.id||''}" data-roll="${s.roll}" data-name="${(s.name||'').toLowerCase()}" data-class="${s.class||s.classId||''}" data-sec="${s.section||''}">
-            <td style="font-weight:700;color:var(--primary)">${s.roll}</td>
+            <td style="font-weight:700;color:var(--primary);cursor:pointer" id="sroll-${s.id||s.roll}" title="Click to edit roll" onclick="editRollInline('${s.id||s.roll}','${s.roll}')">${s.roll} <span style="font-size:9px;opacity:.5">✏️</span></td>
             <td style="font-weight:500" id="sname-${s.id||s.roll}">${s.name||'—'}</td>
             <td style="text-align:center"><span class="badge badge-blue">Cl.${s.class||s.classId||'?'}</span></td>
             <td style="text-align:center"><span class="badge badge-${s.section==='A'?'blue':'purple'}">Sec ${s.section||'?'}</span></td>
             <td style="display:flex;gap:4px">
-              <button class="btn btn-info btn-sm" title="Edit" onclick="editStudentInline('${s.id||s.roll}','${(s.name||'').replace(/'/g,"\\'")}')">✏️</button>
+              <button class="btn btn-info btn-sm" title="Edit" data-id="${s.id||s.roll}" data-name="${(s.name||'').replace(/"/g,'&quot;')}" data-cls="${s.class||s.classId||''}" data-sec="${s.section||''}" onclick="editStudentInline(this.dataset.id,this.dataset.name,this.dataset.cls,this.dataset.sec)">✏️</button>
               <button class="btn btn-danger btn-sm" title="Delete" onclick="deleteStudentItem('${s.id||s.roll}','${s.roll}','${s.class||s.classId||''}','${s.section||''}')">🗑️</button>
             </td>
           </tr>`).join('')
@@ -4585,42 +4585,86 @@ async function deleteStudentItem(idOrRoll, roll, cls, sec) {
     window._allStudents = filtered;
 }
 
-function editStudentInline(idOrRoll, currentName) {
-    const nameCell = document.getElementById(`sname-${idOrRoll}`);
-    if(!nameCell) return;
+function editStudentInline(idOrRoll, currentName, currentClass, currentSec) {
+    const row = document.getElementById(`str-${idOrRoll}`);
+    if(!row) return;
+    if(row.classList.contains('editing')) return;
+    row.classList.add('editing');
 
-    // Already editing?
-    if(nameCell.querySelector('input')) return;
+    // Store original values for cancel
+    row.setAttribute('data-name-orig', currentName||'');
+    row.setAttribute('data-cls-orig',  currentClass||'');
+    row.setAttribute('data-sec-orig',  currentSec||'');
 
-    const oldName = currentName || nameCell.textContent;
-    nameCell.innerHTML = `
-      <div style="display:flex;gap:4px;align-items:center">
-        <input id="edit-inp-${idOrRoll}" value="${oldName}"
-          style="flex:1;padding:4px 8px;border:1.5px solid var(--primary);border-radius:6px;font-size:12px;font-family:inherit;min-width:0"
-          oninput="this.value=this.value.toUpperCase()"
-          onkeydown="if(event.key==='Enter')saveStudentEdit('${idOrRoll}');if(event.key==='Escape')cancelStudentEdit('${idOrRoll}','${oldName}')">
-        <button onclick="saveStudentEdit('${idOrRoll}')" style="padding:3px 8px;background:#059669;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px;white-space:nowrap">✓ Save</button>
-        <button onclick="cancelStudentEdit('${idOrRoll}','${oldName}')" style="padding:3px 6px;background:#64748b;color:white;border:none;border-radius:5px;cursor:pointer;font-size:11px">✕</button>
-      </div>`;
-    document.getElementById(`edit-inp-${idOrRoll}`)?.focus();
+    const clsOpts = ['V','VI','VII','VIII','IX','X']
+        .map(c=>`<option value="${c}" ${c===currentClass?'selected':''}>${c}</option>`).join('');
+
+    // Replace all cells with edit fields
+    row.innerHTML = `
+      <td colspan="5" style="padding:6px 8px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input id="edit-name-${idOrRoll}" value="${currentName||''}"
+            placeholder="Name"
+            oninput="this.value=this.value.toUpperCase()"
+            style="flex:2;min-width:120px;padding:5px 8px;border:1.5px solid var(--primary);border-radius:6px;font-size:12px;font-family:inherit">
+          <select id="edit-cls-${idOrRoll}"
+            style="padding:5px 8px;border:1.5px solid var(--primary);border-radius:6px;font-size:12px;font-family:inherit;background:var(--card);color:var(--text)">
+            ${clsOpts}
+          </select>
+          <select id="edit-sec-${idOrRoll}"
+            style="padding:5px 8px;border:1.5px solid var(--primary);border-radius:6px;font-size:12px;font-family:inherit;background:var(--card);color:var(--text)">
+            <option value="A" ${currentSec==='A'?'selected':''}>A (Boys)</option>
+            <option value="B" ${currentSec==='B'?'selected':''}>B (Girls)</option>
+          </select>
+          <button onclick="saveStudentEdit('${idOrRoll}')"
+            style="padding:5px 12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap">
+            ✓ Save
+          </button>
+          <button onclick="cancelStudentEditRow('${idOrRoll}','${(currentName||'').replace(/'/g,"\\'")}','${currentClass||''}','${currentSec||''}')"
+            style="padding:5px 10px;background:#64748b;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">
+            ✕
+          </button>
+        </div>
+      </td>`;
+
+    row.style.background = 'var(--color-background-info, #eff6ff)';
+    document.getElementById(`edit-name-${idOrRoll}`)?.focus();
 }
 
-function cancelStudentEdit(idOrRoll, oldName) {
-    const nameCell = document.getElementById(`sname-${idOrRoll}`);
-    if(nameCell) nameCell.innerHTML = `<span style="font-weight:500">${oldName}</span>`;
+function cancelStudentEditRow(idOrRoll, oldName, oldCls, oldSec) {
+    const row = document.getElementById(`str-${idOrRoll}`);
+    if(!row) return;
+    row.classList.remove('editing');
+    row.style.background = '';
+    row.innerHTML = `
+      <td style="font-weight:700;color:var(--primary)">${row.getAttribute('data-roll')}</td>
+      <td style="font-weight:500" id="sname-${idOrRoll}">${oldName||'—'}</td>
+      <td style="text-align:center"><span class="badge badge-blue">Cl.${oldCls||'?'}</span></td>
+      <td style="text-align:center"><span class="badge badge-${oldSec==='A'?'blue':'purple'}">Sec ${oldSec||'?'}</span></td>
+      <td style="display:flex;gap:4px">
+        <button class="btn btn-info btn-sm" title="Edit" onclick="editStudentInline('${idOrRoll}','${oldName.replace(/'/g,"\\'")}','${oldCls}','${oldSec}')">✏️</button>
+        <button class="btn btn-danger btn-sm" title="Delete" onclick="deleteStudentItem('${idOrRoll}','${row.getAttribute('data-roll')}','${oldCls}','${oldSec}')">🗑️</button>
+      </td>`;
 }
 
 async function saveStudentEdit(idOrRoll) {
-    const inp = document.getElementById(`edit-inp-${idOrRoll}`);
-    const newName = inp?.value?.trim()?.toUpperCase();
+    const newName = document.getElementById(`edit-name-${idOrRoll}`)?.value?.trim()?.toUpperCase();
+    const newCls  = document.getElementById(`edit-cls-${idOrRoll}`)?.value;
+    const newSec  = document.getElementById(`edit-sec-${idOrRoll}`)?.value;
+
     if(!newName) { showAlert('নাম লিখুন।','error'); return; }
+    if(!newCls)  { showAlert('Class select করুন।','error'); return; }
 
     const students = await DB.get('students');
-    let found = false;
+    let found = null;
     students.forEach(s => {
         if(s.id === idOrRoll || String(s.roll) === String(idOrRoll)) {
-            s.name = newName;
-            found = true;
+            s.name    = newName;
+            s.class   = newCls;
+            s.classId = newCls;
+            s.section = newSec;
+            s.gender  = newSec==='A' ? 'Male' : 'Female';
+            found = s;
         }
     });
 
@@ -4628,15 +4672,93 @@ async function saveStudentEdit(idOrRoll) {
 
     await DB.set('students', students);
     DB.invalidate('students');
-
-    const nameCell = document.getElementById(`sname-${idOrRoll}`);
-    if(nameCell) {
-        nameCell.innerHTML = `<span style="font-weight:500">${newName}</span>`;
-        nameCell.closest('tr').style.background = '#d1fae5';
-        setTimeout(()=>{ nameCell.closest('tr').style.background = ''; }, 1500);
-    }
     window._allStudents = students;
-    showAlert(`✅ "${newName}" updated!`, 'success');
+
+    // Restore row with updated data
+    const row = document.getElementById(`str-${idOrRoll}`);
+    if(row) {
+        row.classList.remove('editing');
+        row.setAttribute('data-class', newCls);
+        row.setAttribute('data-sec', newSec);
+        row.setAttribute('data-name', newName.toLowerCase());
+        row.style.background = '#d1fae5';
+        row.innerHTML = `
+          <td style="font-weight:700;color:var(--primary);cursor:pointer" id="sroll-${idOrRoll}" title="Click to edit roll" onclick="editRollInline('${idOrRoll}','${found.roll}')">${found.roll} <span style="font-size:9px;opacity:.5">✏️</span></td>
+          <td style="font-weight:500" id="sname-${idOrRoll}">${newName}</td>
+          <td style="text-align:center"><span class="badge badge-blue">Cl.${newCls}</span></td>
+          <td style="text-align:center"><span class="badge badge-${newSec==='A'?'blue':'purple'}">Sec ${newSec}</span></td>
+          <td style="display:flex;gap:4px">
+            <button class="btn btn-info btn-sm" title="Edit" onclick="editStudentInline('${idOrRoll}','${newName.replace(/'/g,"\\'")}','${newCls}','${newSec}')">✏️</button>
+            <button class="btn btn-danger btn-sm" title="Delete" onclick="deleteStudentItem('${idOrRoll}','${found.roll}','${newCls}','${newSec}')">🗑️</button>
+          </td>`;
+        setTimeout(()=>{ if(row) row.style.background=''; }, 1800);
+    }
+    showAlert(`✅ Updated: ${newName} (Class ${newCls}-${newSec})`, 'success');
+}
+
+// Roll inline edit
+function editRollInline(idOrRoll, currentRoll) {
+    const rollCell = document.getElementById(`sroll-${idOrRoll}`);
+    if(!rollCell || rollCell.querySelector('input')) return;
+
+    rollCell.innerHTML = `
+      <div style="display:flex;gap:3px;align-items:center">
+        <input id="edit-roll-${idOrRoll}" type="number" value="${currentRoll}" min="1"
+          style="width:60px;padding:3px 6px;border:1.5px solid var(--primary);border-radius:5px;font-size:12px;font-weight:700;color:var(--primary)"
+          onkeydown="if(event.key==='Enter')saveRollEdit('${idOrRoll}','${currentRoll}');if(event.key==='Escape')cancelRollEdit('${idOrRoll}','${currentRoll}')">
+        <button onclick="saveRollEdit('${idOrRoll}','${currentRoll}')" style="padding:2px 6px;background:#059669;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px">✓</button>
+        <button onclick="cancelRollEdit('${idOrRoll}','${currentRoll}')" style="padding:2px 5px;background:#64748b;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px">✕</button>
+      </div>`;
+    document.getElementById(`edit-roll-${idOrRoll}`)?.focus();
+    document.getElementById(`edit-roll-${idOrRoll}`)?.select();
+}
+
+function cancelRollEdit(idOrRoll, oldRoll) {
+    const rollCell = document.getElementById(`sroll-${idOrRoll}`);
+    if(rollCell) rollCell.innerHTML = `${oldRoll} <span style="font-size:9px;opacity:.5">✏️</span>`;
+}
+
+async function saveRollEdit(idOrRoll, oldRoll) {
+    const inp    = document.getElementById(`edit-roll-${idOrRoll}`);
+    const newRoll= parseInt(inp?.value);
+    if(!newRoll || newRoll < 1) { showAlert('সঠিক Roll দিন।','error'); return; }
+    if(String(newRoll) === String(oldRoll)) {
+        cancelRollEdit(idOrRoll, oldRoll);
+        return;
+    }
+
+    const students = await DB.get('students');
+    let found = null;
+    students.forEach(s => {
+        if(s.id === idOrRoll || String(s.roll) === String(idOrRoll)) {
+            s.roll = newRoll;
+            found  = s;
+        }
+    });
+
+    if(!found) { showAlert('Student পাওয়া যায়নি!','error'); return; }
+
+    // Check duplicate roll in same class+section
+    const dup = students.find(s=>
+        String(s.roll)===String(newRoll) &&
+        (s.class||s.classId)===(found.class||found.classId) &&
+        s.section===found.section &&
+        s.id !== found.id
+    );
+    if(dup) { showAlert(`Roll ${newRoll} already exists! (${dup.name})`, 'warning'); cancelRollEdit(idOrRoll, oldRoll); return; }
+
+    await DB.set('students', students);
+    DB.invalidate('students');
+    window._allStudents = students;
+
+    const rollCell = document.getElementById(`sroll-${idOrRoll}`);
+    if(rollCell) {
+        rollCell.innerHTML = `${newRoll} <span style="font-size:9px;opacity:.5">✏️</span>`;
+        rollCell.closest('tr')?.setAttribute('data-roll', newRoll);
+        rollCell.closest('tr').style.background = '#d1fae5';
+        setTimeout(()=>{ rollCell.closest('tr').style.background=''; }, 1500);
+    }
+    showAlert(`✅ Roll ${oldRoll} → ${newRoll} updated!`, 'success');
 }
 
 function downloadStudentXLSX() {
